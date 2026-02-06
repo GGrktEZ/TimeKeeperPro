@@ -5,49 +5,6 @@ import type { Project, DayEntry, DayProjectEntry } from "./types"
 
 const PROJECTS_KEY = "timetrack-projects"
 const ENTRIES_KEY = "timetrack-entries"
-const SETTINGS_KEY = "timetrack-settings"
-
-interface Settings {
-  roundToFive: boolean
-}
-
-const DEFAULT_SETTINGS: Settings = {
-  roundToFive: false,
-}
-
-export function useSettings() {
-  const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS)
-  const [isLoaded, setIsLoaded] = useState(false)
-
-  useEffect(() => {
-    const stored = localStorage.getItem(SETTINGS_KEY)
-    if (stored) {
-      try {
-        setSettings({ ...DEFAULT_SETTINGS, ...JSON.parse(stored) })
-      } catch {
-        setSettings(DEFAULT_SETTINGS)
-      }
-    }
-    setIsLoaded(true)
-  }, [])
-
-  useEffect(() => {
-    if (isLoaded) {
-      localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings))
-    }
-  }, [settings, isLoaded])
-
-  const toggleRoundToFive = useCallback(() => {
-    setSettings((prev) => ({ ...prev, roundToFive: !prev.roundToFive }))
-  }, [])
-
-  return {
-    settings,
-    isLoaded,
-    toggleRoundToFive,
-  }
-}
-
 function generateId(): string {
   return Math.random().toString(36).substring(2, 15) + Date.now().toString(36)
 }

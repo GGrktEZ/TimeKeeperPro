@@ -7,15 +7,14 @@ import { DailyView } from "@/components/daily-view"
 import { ProjectsView } from "@/components/projects-view"
 import { StatsView } from "@/components/stats-view"
 import { UndoBar } from "@/components/undo-bar"
-import { useProjects, useDayEntries, useSettings } from "@/lib/store"
+import { useProjects, useDayEntries } from "@/lib/store"
 import { useUndo } from "@/lib/use-undo"
+import { roundTimeToFive } from "@/lib/utils"
 import type { View, DayEntry, DayProjectEntry, Project } from "@/lib/types"
 
 export default function HomePage() {
   const [currentView, setCurrentView] = useState<View>("daily")
   const [selectedDate, setSelectedDate] = useState(() => format(new Date(), "yyyy-MM-dd"))
-
-  const { settings, isLoaded: settingsLoaded, toggleRoundToFive } = useSettings()
 
   const {
     projects,
@@ -179,7 +178,51 @@ export default function HomePage() {
     [handleUpdateEntry, snapshot]
   )
 
-  const isLoading = !projectsLoaded || !entriesLoaded || !settingsLoaded
+  // Round every time value in the current day's entry to the nearest 5 minutes
+  const handleRoundToFive = useCallback(() => {
+    if (!currentEntry) return
+    snapshot("Round times to 5 min")
+
+    // Round clock & lunch times
+    const roundedEntry: Partial<DayEntry> = {
+      clockIn: roundTimeToFive(currentEntry.clockIn) || null,
+      clockOut: roundTimeToFive(currentEntry.clockOut) || null,
+      lunchStart: roundTimeToFive(currentEntry.lunchStart) || null,
+      lunchEnd: roundTimeToFive(currentEntry.lunchEnd) || null,
+      breaks: currentEntry.breaks.map((b) => ({
+        ...b,
+        start: roundTimeToFive(b.start),
+        end: roundTimeToFive(b.end),
+      })),
+    }
+    handleUpdateEntry(roundedEntry)
+
+    // Round every work-session start/end for each project
+    for (const dp of currentEntry.projects) {
+      if (!dp.workSessions?.length) continue
+      const roundedSessions = dp.workSessions.map((s) => ({
+        ...s,
+        start: roundTimeToFive(s.start),
+        end: roundTimeToFive(s.end),
+      }))
+      // Recalculate hoursWorked
+      let totalMin = 0
+      for (const s of roundedSessions) {
+        if (s.start && s.end) {
+          const [sH, sM] = s.start.split(":").map(Number)
+          const [eH, eM] = s.end.split(":").map(Number)
+          const d = (eH * 60 + eM) - (sH * 60 + sM)
+          if (d > 0) totalMin += d
+        }
+      }
+      updateDayProject(selectedDate, dp.id, {
+        workSessions: roundedSessions,
+        hoursWorked: Math.round((totalMin / 60) * 100) / 100,
+      })
+    }
+  }, [currentEntry, snapshot, handleUpdateEntry, updateDayProject, selectedDate])
+
+  const isLoading = !projectsLoaded || !entriesLoaded
 
   if (isLoading) {
     return (
@@ -202,8 +245,6 @@ export default function HomePage() {
         projects={projects}
         currentEntry={currentEntry}
         onImport={handleImport}
-        roundToFive={settings.roundToFive}
-        onToggleRoundToFive={toggleRoundToFive}
       />
       
       <main className="mx-auto max-w-7xl px-4 py-6">
@@ -219,7 +260,7 @@ export default function HomePage() {
             onUpdateProject={handleUpdateDayProject}
             onRemoveProject={handleRemoveDayProject}
             onReorderProjects={handleReorderProjects}
-            roundToFive={settings.roundToFive}
+            onRoundToFive={handleRoundToFive}
           />
         ) : currentView === "projects" ? (
           <ProjectsView

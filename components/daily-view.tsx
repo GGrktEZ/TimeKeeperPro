@@ -1,6 +1,9 @@
 "use client"
 
 import { format, parseISO } from "date-fns"
+import { Timer } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { DateSelector } from "./date-selector"
 import { TimeEntry } from "./time-entry"
 import { DayProjects } from "./day-projects"
@@ -17,7 +20,7 @@ interface DailyViewProps {
   onUpdateProject: (projectEntryId: string, data: Partial<DayProjectEntry>) => void
   onRemoveProject: (projectEntryId: string) => void
   onReorderProjects: (fromIndex: number, toIndex: number) => void
-  roundToFive: boolean
+  onRoundToFive: () => void
 }
 
 export function DailyView({
@@ -31,7 +34,7 @@ export function DailyView({
   onUpdateProject,
   onRemoveProject,
   onReorderProjects,
-  roundToFive,
+  onRoundToFive,
 }: DailyViewProps) {
   return (
     <div className="space-y-6">
@@ -42,7 +45,28 @@ export function DailyView({
             Track your hours and project work for {format(parseISO(selectedDate), "MMMM d, yyyy")}
           </p>
         </div>
-        <DateSelector selectedDate={selectedDate} onDateChange={onDateChange} />
+        <div className="flex items-center gap-2">
+          <DateSelector selectedDate={selectedDate} onDateChange={onDateChange} />
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={onRoundToFive}
+                  className="h-9 w-9 shrink-0 bg-transparent"
+                  disabled={!entry}
+                >
+                  <Timer className="h-4 w-4" />
+                  <span className="sr-only">Round all times to nearest 5 minutes</span>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Round all times to nearest 5 min</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        </div>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
@@ -52,7 +76,6 @@ export function DailyView({
           onUpdate={onUpdateEntry}
           dayProjects={entry?.projects ?? []}
           onUpdateProject={onUpdateProject}
-          roundToFive={roundToFive}
         />
         <DayProjects
           projects={projects}
@@ -61,7 +84,6 @@ export function DailyView({
           onUpdateProject={onUpdateProject}
           onRemoveProject={onRemoveProject}
           onReorderProjects={onReorderProjects}
-          roundToFive={roundToFive}
         />
       </div>
     </div>

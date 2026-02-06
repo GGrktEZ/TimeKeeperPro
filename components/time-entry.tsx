@@ -8,7 +8,6 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import type { DayEntry, Break, DayProjectEntry, WorkSession } from "@/lib/types"
-import { getCurrentTimeString } from "@/lib/utils"
 import { parseISO, isToday } from "date-fns"
 
 interface TimeEntryProps {
@@ -17,7 +16,6 @@ interface TimeEntryProps {
   onUpdate: (data: Partial<DayEntry>) => void
   dayProjects: DayProjectEntry[]
   onUpdateProject: (projectEntryId: string, data: Partial<DayProjectEntry>) => void
-  roundToFive: boolean
 }
 
 function generateId(): string {
@@ -167,7 +165,7 @@ function minutesToString(minutes: number): string {
   return `${h}h ${m}m`
 }
 
-export function TimeEntry({ entry, selectedDate, onUpdate, dayProjects, onUpdateProject, roundToFive }: TimeEntryProps) {
+export function TimeEntry({ entry, selectedDate, onUpdate, dayProjects, onUpdateProject }: TimeEntryProps) {
   const [currentTime, setCurrentTime] = useState(Date.now())
   
   const clockIn = entry?.clockIn ?? ""
@@ -197,8 +195,7 @@ export function TimeEntry({ entry, selectedDate, onUpdate, dayProjects, onUpdate
   }, [shouldShowLiveTime])
 
   // End all active project sessions (preserving their notes)
-  const endAllActiveProjectSessions = (timeString?: string) => {
-    if (!timeString) timeString = getCurrentTimeString(roundToFive)
+  const endAllActiveProjectSessions = (timeString: string) => {
     for (const dayProject of dayProjects) {
       const sessions = dayProject.workSessions ?? []
       const hasActive = sessions.some(s => s.start && !s.end)
@@ -214,7 +211,8 @@ export function TimeEntry({ entry, selectedDate, onUpdate, dayProjects, onUpdate
   }
 
   const setCurrentTimeField = (field: keyof Pick<DayEntry, 'clockIn' | 'clockOut' | 'lunchStart' | 'lunchEnd'>) => {
-    const timeString = getCurrentTimeString(roundToFive)
+    const now = new Date()
+    const timeString = now.toTimeString().slice(0, 5)
     
     // Auto-end active project sessions when starting lunch or clock out
     if (field === 'lunchStart' || field === 'clockOut') {
@@ -241,7 +239,8 @@ export function TimeEntry({ entry, selectedDate, onUpdate, dayProjects, onUpdate
   }
 
   const setBreakCurrentTime = (id: string, field: 'start' | 'end') => {
-    const timeString = getCurrentTimeString(roundToFive)
+    const now = new Date()
+    const timeString = now.toTimeString().slice(0, 5)
     
     // Auto-end active project sessions when starting a break
     if (field === 'start') {
