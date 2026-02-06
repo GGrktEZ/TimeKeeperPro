@@ -1,12 +1,35 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import type { Project, DayEntry, DayProjectEntry } from "./types"
+import type { Project, DayEntry, DayProjectEntry, AttendancePeriod } from "./types"
 
 const PROJECTS_KEY = "timetrack-projects"
 const ENTRIES_KEY = "timetrack-entries"
 function generateId(): string {
   return Math.random().toString(36).substring(2, 15) + Date.now().toString(36)
+}
+
+/** Migrate old clockIn/clockOut/homeOffice entries to the new attendance array */
+function migrateEntry(entry: DayEntry): DayEntry {
+  // Already migrated
+  if (entry.attendance) return entry
+
+  const attendance: AttendancePeriod[] = []
+  const legacy = entry as DayEntry & { clockIn?: string | null; clockOut?: string | null; homeOffice?: boolean }
+
+  if (legacy.clockIn) {
+    attendance.push({
+      id: generateId(),
+      start: legacy.clockIn,
+      end: legacy.clockOut ?? "",
+      location: legacy.homeOffice ? "home" : "office",
+    })
+  }
+
+  return {
+    ...entry,
+    attendance,
+  }
 }
 
 const PROJECT_COLORS = [
@@ -132,7 +155,8 @@ export function useDayEntries() {
     const stored = localStorage.getItem(ENTRIES_KEY)
     if (stored) {
       try {
-        setEntries(JSON.parse(stored))
+        const parsed: DayEntry[] = JSON.parse(stored)
+        setEntries(parsed.map(migrateEntry))
       } catch {
         setEntries([])
       }
@@ -165,12 +189,10 @@ export function useDayEntries() {
         const newEntry: DayEntry = {
           id: generateId(),
           date,
-          clockIn: data.clockIn ?? null,
-          clockOut: data.clockOut ?? null,
+          attendance: data.attendance ?? [],
           lunchStart: data.lunchStart ?? null,
           lunchEnd: data.lunchEnd ?? null,
           breaks: data.breaks ?? [],
-          homeOffice: data.homeOffice ?? false,
           scheduleNotes: data.scheduleNotes ?? "",
           projects: data.projects ?? [],
           createdAt: new Date().toISOString(),
@@ -277,25 +299,25 @@ export function useDayEntries() {
           // Merge with existing entry
           const idx = result.findIndex((e) => e.date === entry.date)
           if (idx !== -1) {
+            const migrated = migrateEntry(entry)
+            const migratedExisting = migrateEntry(existingEntry)
             result[idx] = {
-              ...existingEntry,
-              clockIn: entry.clockIn || existingEntry.clockIn,
-              clockOut: entry.clockOut || existingEntry.clockOut,
-              lunchStart: entry.lunchStart || existingEntry.lunchStart,
-              lunchEnd: entry.lunchEnd || existingEntry.lunchEnd,
-              breaks: entry.breaks.length > 0 ? entry.breaks : existingEntry.breaks,
-              homeOffice: entry.homeOffice ?? existingEntry.homeOffice ?? false,
-              scheduleNotes: entry.scheduleNotes || existingEntry.scheduleNotes,
-              projects: mappedProjects.length > 0 ? mappedProjects : existingEntry.projects,
+              ...migratedExisting,
+              attendance: migrated.attendance.length > 0 ? migrated.attendance : migratedExisting.attendance,
+              lunchStart: entry.lunchStart || migratedExisting.lunchStart,
+              lunchEnd: entry.lunchEnd || migratedExisting.lunchEnd,
+              breaks: entry.breaks?.length > 0 ? entry.breaks : migratedExisting.breaks,
+              scheduleNotes: entry.scheduleNotes || migratedExisting.scheduleNotes,
+              projects: mappedProjects.length > 0 ? mappedProjects : migratedExisting.projects,
               updatedAt: new Date().toISOString(),
             }
           }
         } else {
           // Add new entry
-          result.push({
+          result.push(migrateEntry({
             ...entry,
             projects: mappedProjects,
-          })
+          }))
         }
       }
       

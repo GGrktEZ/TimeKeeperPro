@@ -165,9 +165,9 @@ export default function HomePage() {
   // Snapshot on clock in/out and time changes
   const handleUpdateEntryWithSnapshot = useCallback(
     (data: Partial<DayEntry>) => {
-      // Snapshot for significant time changes (clock, lunch, breaks)
-      if (data.clockIn !== undefined || data.clockOut !== undefined) {
-        snapshot("Update clock time")
+      // Snapshot for significant time changes (attendance, lunch, breaks)
+      if (data.attendance !== undefined) {
+        snapshot("Update attendance")
       } else if (data.lunchStart !== undefined || data.lunchEnd !== undefined) {
         snapshot("Update lunch time")
       } else if (data.breaks !== undefined) {
@@ -183,10 +183,13 @@ export default function HomePage() {
     if (!currentEntry) return
     snapshot("Round times to 5 min")
 
-    // Round clock & lunch times
+    // Round attendance, lunch, and break times
     const roundedEntry: Partial<DayEntry> = {
-      clockIn: roundTimeToFive(currentEntry.clockIn) || null,
-      clockOut: roundTimeToFive(currentEntry.clockOut) || null,
+      attendance: (currentEntry.attendance ?? []).map((a) => ({
+        ...a,
+        start: roundTimeToFive(a.start),
+        end: roundTimeToFive(a.end),
+      })),
       lunchStart: roundTimeToFive(currentEntry.lunchStart) || null,
       lunchEnd: roundTimeToFive(currentEntry.lunchEnd) || null,
       breaks: currentEntry.breaks.map((b) => ({

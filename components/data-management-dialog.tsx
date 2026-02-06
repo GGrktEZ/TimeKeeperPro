@@ -88,8 +88,18 @@ export function DataManagementDialog({
         const importedEntries: DayEntry[] = data.entries.map((entry, idx) => ({
           id: `imported-${Date.now()}-${idx}`,
           date: entry.date,
-          clockIn: entry.clockIn,
-          clockOut: entry.clockOut,
+          attendance: (entry.attendance ?? []).map((a, aIdx) => ({
+            id: `att-${Date.now()}-${idx}-${aIdx}`,
+            start: a.start ?? "",
+            end: a.end ?? "",
+            location: a.location ?? "office",
+          })),
+          // Support legacy imports that still have clockIn/clockOut
+          ...(entry.clockIn && !entry.attendance ? {
+            clockIn: entry.clockIn,
+            clockOut: entry.clockOut,
+            homeOffice: entry.homeOffice ?? false,
+          } : {}),
           lunchStart: entry.lunchStart,
           lunchEnd: entry.lunchEnd,
           breaks: (entry.breaks ?? []).map((b, bIdx) => ({

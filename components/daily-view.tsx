@@ -80,6 +80,7 @@ export function DailyView({
         <DayProjects
           projects={projects}
           dayProjects={entry?.projects ?? []}
+          attendance={entry?.attendance ?? []}
           onAddProject={onAddProject}
           onUpdateProject={onUpdateProject}
           onRemoveProject={onRemoveProject}

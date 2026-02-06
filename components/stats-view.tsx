@@ -45,10 +45,15 @@ function entryWorkMinutes(entry: DayEntry): number {
 }
 
 function entryOfficeMinutes(entry: DayEntry): number {
-  if (!entry.clockIn || !entry.clockOut) return 0
-  const [iH, iM] = entry.clockIn.split(":").map(Number)
-  const [oH, oM] = entry.clockOut.split(":").map(Number)
-  let total = (oH * 60 + oM) - (iH * 60 + iM)
+  let total = 0
+  for (const a of entry.attendance ?? []) {
+    if (a.start && a.end) {
+      const [iH, iM] = a.start.split(":").map(Number)
+      const [oH, oM] = a.end.split(":").map(Number)
+      const d = (oH * 60 + oM) - (iH * 60 + iM)
+      if (d > 0) total += d
+    }
+  }
   if (total <= 0) return 0
   for (const b of entry.breaks ?? []) {
     if (b.start && b.end) {
@@ -59,6 +64,32 @@ function entryOfficeMinutes(entry: DayEntry): number {
     }
   }
   return Math.max(0, total)
+}
+
+function entryHomeMinutes(entry: DayEntry): number {
+  let total = 0
+  for (const a of entry.attendance ?? []) {
+    if (a.start && a.end && a.location === "home") {
+      const [iH, iM] = a.start.split(":").map(Number)
+      const [oH, oM] = a.end.split(":").map(Number)
+      const d = (oH * 60 + oM) - (iH * 60 + iM)
+      if (d > 0) total += d
+    }
+  }
+  return total
+}
+
+function entryInOfficeMinutes(entry: DayEntry): number {
+  let total = 0
+  for (const a of entry.attendance ?? []) {
+    if (a.start && a.end && a.location === "office") {
+      const [iH, iM] = a.start.split(":").map(Number)
+      const [oH, oM] = a.end.split(":").map(Number)
+      const d = (oH * 60 + oM) - (iH * 60 + iM)
+      if (d > 0) total += d
+    }
+  }
+  return total
 }
 
 function entryLunchMinutes(entry: DayEntry): number {
@@ -101,7 +132,8 @@ export function StatsView({ entries, projects }: StatsViewProps) {
   const stats = useMemo(() => {
     const allTime = {
       workMin: 0, officeMin: 0, lunchMin: 0, breakMin: 0,
-      daysWorked: 0, totalSessions: 0, homeOfficeDays: 0,
+      daysWorked: 0, totalSessions: 0,
+      homeMin: 0, inOfficeMin: 0, homeOfficeDays: 0, inOfficeDays: 0, mixedDays: 0,
     }
     const weekStart = startOfWeek(today, { weekStartsOn: 1 })
     const weekEnd = endOfWeek(today, { weekStartsOn: 1 })
@@ -156,25 +188,42 @@ export function StatsView({ entries, projects }: StatsViewProps) {
       const sessCount = (e.projects ?? []).reduce((acc, p) => acc + (p.workSessions?.filter(s => s.start && s.end).length ?? 0), 0)
       const d = parseISO(e.date)
 
+      const homeMins = entryHomeMinutes(e)
+      const inOfficeMins = entryInOfficeMinutes(e)
+
       if (work > 0 || office > 0) {
         allTime.daysWorked++
         streakCheck.add(e.date)
-        if (e.homeOffice) allTime.homeOfficeDays++
+        const hasHome = homeMins > 0
+        const hasOffice = inOfficeMins > 0
+        if (hasHome && hasOffice) allTime.mixedDays++
+        else if (hasHome) allTime.homeOfficeDays++
+        else if (hasOffice) allTime.inOfficeDays++
       }
       allTime.workMin += work
       allTime.officeMin += office
       allTime.lunchMin += lunch
       allTime.breakMin += breaks
       allTime.totalSessions += sessCount
+      allTime.homeMin += homeMins
+      allTime.inOfficeMin += inOfficeMins
 
-      // Clock times
-      if (e.clockIn) {
-        const [h, m] = e.clockIn.split(":").map(Number)
-        clockInTimes.push(h * 60 + m)
-      }
-      if (e.clockOut) {
-        const [h, m] = e.clockOut.split(":").map(Number)
-        clockOutTimes.push(h * 60 + m)
+      // Clock times from attendance periods
+      const attendancePeriods = e.attendance ?? []
+      if (attendancePeriods.length > 0) {
+        // Earliest start
+        const starts = attendancePeriods.filter(a => a.start).map(a => {
+          const [h, m] = a.start.split(":").map(Number)
+          return h * 60 + m
+        })
+        if (starts.length > 0) clockInTimes.push(Math.min(...starts))
+
+        // Latest end
+        const ends = attendancePeriods.filter(a => a.end).map(a => {
+          const [h, m] = a.end.split(":").map(Number)
+          return h * 60 + m
+        })
+        if (ends.length > 0) clockOutTimes.push(Math.max(...ends))
       }
 
       // Day-of-week (Mon=0)
@@ -687,13 +736,16 @@ export function StatsView({ entries, projects }: StatsViewProps) {
             <div className="rounded-lg bg-secondary/30 p-3">
               <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
                 <Home className="h-3 w-3" />
-                Home Office Days
+                Location Split
               </p>
-              <p className="mt-1 text-lg font-bold tabular-nums text-cyan-400">{stats.allTime.homeOfficeDays}</p>
+              <div className="mt-1 flex items-baseline gap-2">
+                <span className="text-lg font-bold tabular-nums text-cyan-400">{stats.allTime.homeOfficeDays + stats.allTime.mixedDays}</span>
+                <span className="text-xs text-muted-foreground">home</span>
+                <span className="text-lg font-bold tabular-nums text-blue-400">{stats.allTime.inOfficeDays + stats.allTime.mixedDays}</span>
+                <span className="text-xs text-muted-foreground">office</span>
+              </div>
               <p className="text-xs text-muted-foreground">
-                {stats.allTime.daysWorked > 0
-                  ? `${Math.round((stats.allTime.homeOfficeDays / stats.allTime.daysWorked) * 100)}% of work days`
-                  : "No data yet"}
+                {stats.allTime.mixedDays > 0 ? `${stats.allTime.mixedDays} mixed days` : `${mToStr(stats.allTime.homeMin)} at home, ${mToStr(stats.allTime.inOfficeMin)} in office`}
               </p>
             </div>
             <div className="rounded-lg bg-secondary/30 p-3">

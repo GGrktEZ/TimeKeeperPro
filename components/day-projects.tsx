@@ -2,7 +2,7 @@
 
 import React from "react"
 
-import { Trash2, FolderKanban, Clock, Plus, Play, Square, CheckCircle2, ListTodo, ChevronDown, ChevronUp, GripVertical } from "lucide-react"
+import { Trash2, FolderKanban, Clock, Plus, Play, Square, CheckCircle2, ListTodo, ChevronDown, ChevronUp, GripVertical, Home, Building2 } from "lucide-react"
 import { useState, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -10,11 +10,13 @@ import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { ProjectSelector } from "./project-selector"
 import { AutoResizeTextarea } from "@/components/ui/auto-resize-textarea"
-import type { Project, DayProjectEntry, WorkSession } from "@/lib/types"
+import type { Project, DayProjectEntry, WorkSession, AttendancePeriod } from "@/lib/types"
+import { getSessionLocation } from "@/lib/utils"
 
 interface DayProjectsProps {
   projects: Project[]
   dayProjects: DayProjectEntry[]
+  attendance: AttendancePeriod[]
   onAddProject: (projectId: string) => void
   onUpdateProject: (projectEntryId: string, data: Partial<DayProjectEntry>) => void
   onRemoveProject: (projectEntryId: string) => void
@@ -149,12 +151,14 @@ function WorkSessionItem({
   projectEntryId,
   sessions,
   onUpdate,
+  attendance,
 }: {
   session: WorkSession
   index: number
   projectEntryId: string
   sessions: WorkSession[]
   onUpdate: (projectEntryId: string, data: Partial<DayProjectEntry>) => void
+  attendance: AttendancePeriod[]
 }) {
   const [isExpanded, setIsExpanded] = useState(false)
   const isActive = session.start && !session.end
@@ -182,6 +186,7 @@ function WorkSessionItem({
   }
 
   const hasNotes = (session.doneNotes && session.doneNotes.trim()) || (session.todoNotes && session.todoNotes.trim())
+  const location = getSessionLocation(attendance, session.start)
 
   return (
     <div
@@ -193,9 +198,21 @@ function WorkSessionItem({
     >
       {/* Session Header */}
       <div className="flex items-center gap-2 p-2">
-        <span className="w-6 shrink-0 text-center text-xs text-muted-foreground">
-          {index + 1}.
-        </span>
+        <div className="flex w-6 shrink-0 flex-col items-center gap-0.5">
+          <span className="text-center text-xs text-muted-foreground">
+            {index + 1}.
+          </span>
+          {location && (
+            <span className={`flex h-4 w-4 items-center justify-center rounded-full ${
+              location === "home" ? "bg-cyan-500/20" : "bg-blue-500/20"
+            }`} title={location === "home" ? "Home" : "Office"}>
+              {location === "home"
+                ? <Home className="h-2.5 w-2.5 text-cyan-400" />
+                : <Building2 className="h-2.5 w-2.5 text-blue-400" />
+              }
+            </span>
+          )}
+        </div>
         <div className="grid flex-1 grid-cols-2 gap-2">
           <div className="flex gap-1">
             <Input
@@ -300,6 +317,7 @@ function WorkSessionItem({
 export function DayProjects({
   projects,
   dayProjects,
+  attendance,
   onAddProject,
   onUpdateProject,
   onRemoveProject,
@@ -514,6 +532,7 @@ export function DayProjects({
                           projectEntryId={dayProject.id}
                           sessions={sessions}
                           onUpdate={onUpdateProject}
+                          attendance={attendance}
                         />
                       ))}
                     </div>

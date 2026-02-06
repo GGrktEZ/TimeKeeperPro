@@ -1,15 +1,13 @@
-import type { DayEntry, Project, WorkSession } from "./types"
+import type { DayEntry, Project, WorkSession, AttendancePeriod } from "./types"
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, parseISO } from "date-fns"
 
 export interface ExportedDayEntry {
   date: string
   dayOfWeek: string
-  clockIn: string | null
-  clockOut: string | null
+  attendance: { start: string; end: string; location: "home" | "office" }[]
   lunchStart: string | null
   lunchEnd: string | null
   breaks: { start: string; end: string }[]
-  homeOffice: boolean
   hoursWorked: string | null
   hoursInOffice: string | null
   scheduleNotes: string
@@ -63,13 +61,20 @@ function calculateProjectMinutes(entry: DayEntry): number {
   return totalMinutes
 }
 
-// Calculate office hours (clock in/out minus breaks only, lunch is NOT subtracted)
+// Calculate total attendance hours (all periods minus breaks, lunch is NOT subtracted)
 function calculateOfficeMinutes(entry: DayEntry): number | null {
-  if (!entry.clockIn || !entry.clockOut) return null
-  
-  const [inH, inM] = entry.clockIn.split(":").map(Number)
-  const [outH, outM] = entry.clockOut.split(":").map(Number)
-  let totalMinutes = (outH * 60 + outM) - (inH * 60 + inM)
+  const attendance = entry.attendance ?? []
+  if (attendance.length === 0) return null
+
+  let totalMinutes = 0
+  for (const a of attendance) {
+    if (a.start && a.end) {
+      const [inH, inM] = a.start.split(":").map(Number)
+      const [outH, outM] = a.end.split(":").map(Number)
+      const d = (outH * 60 + outM) - (inH * 60 + inM)
+      if (d > 0) totalMinutes += d
+    }
+  }
   
   if (totalMinutes <= 0) return null
   
@@ -103,12 +108,14 @@ function transformEntry(entry: DayEntry, projects: Project[]): ExportedDayEntry 
   return {
     date: entry.date,
     dayOfWeek: format(parseISO(entry.date), "EEEE"),
-    clockIn: entry.clockIn,
-    clockOut: entry.clockOut,
+    attendance: (entry.attendance ?? []).filter(a => a.start).map(a => ({
+      start: a.start,
+      end: a.end,
+      location: a.location,
+    })),
     lunchStart: entry.lunchStart,
     lunchEnd: entry.lunchEnd,
     breaks: (entry.breaks ?? []).filter(b => b.start && b.end).map(b => ({ start: b.start, end: b.end })),
-    homeOffice: entry.homeOffice ?? false,
     hoursWorked: projectMinutes > 0 ? minutesToHoursString(projectMinutes) : null,
     hoursInOffice: officeMinutes ? minutesToHoursString(officeMinutes) : null,
     scheduleNotes: entry.scheduleNotes,
@@ -164,7 +171,7 @@ export function exportDay(
     exportType: "day",
     period: format(parseISO(date), "MMMM d, yyyy"),
     summary: {
-      totalDaysWorked: entries.length > 0 && (entries[0].clockIn || entries[0].projects.length > 0) ? 1 : 0,
+      totalDaysWorked: entries.length > 0 && (entries[0].attendance.length > 0 || entries[0].projects.length > 0) ? 1 : 0,
       totalHoursWorked: minutesToHoursString(totalWorkMinutes),
       totalHoursInOffice: minutesToHoursString(totalOfficeMinutes),
       projectsSummary: Object.entries(projectHours).map(([name, hours]) => ({
@@ -195,7 +202,7 @@ export function exportMonth(
     const dayStr = format(day, "yyyy-MM-dd")
     const entry = allEntries.find((e) => e.date === dayStr)
     
-    if (entry && (entry.clockIn || entry.projects.length > 0 || entry.scheduleNotes)) {
+    if (entry && ((entry.attendance ?? []).length > 0 || entry.projects.length > 0 || entry.scheduleNotes)) {
       const transformed = transformEntry(entry, projects)
       entries.push(transformed)
       
@@ -247,7 +254,7 @@ export function exportAll(
   const sortedEntries = [...allEntries].sort((a, b) => a.date.localeCompare(b.date))
 
   for (const entry of sortedEntries) {
-    if (entry.clockIn || entry.projects.length > 0 || entry.scheduleNotes) {
+    if ((entry.attendance ?? []).length > 0 || entry.projects.length > 0 || entry.scheduleNotes) {
       const transformed = transformEntry(entry, projects)
       entries.push(transformed)
       

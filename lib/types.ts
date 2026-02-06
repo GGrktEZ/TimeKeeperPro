@@ -31,19 +31,33 @@ export interface Break {
   end: string
 }
 
+export type AttendanceLocation = "office" | "home"
+
+export interface AttendancePeriod {
+  id: string
+  start: string
+  end: string
+  location: AttendanceLocation
+}
+
 export interface DayEntry {
   id: string
   date: string
-  clockIn: string | null
-  clockOut: string | null
+  attendance: AttendancePeriod[]
   lunchStart: string | null
   lunchEnd: string | null
   breaks: Break[]
-  homeOffice: boolean
   scheduleNotes: string
   projects: DayProjectEntry[]
   createdAt: string
   updatedAt: string
+
+  /** @deprecated Use attendance array instead */
+  clockIn?: string | null
+  /** @deprecated Use attendance array instead */
+  clockOut?: string | null
+  /** @deprecated Use attendance array instead */
+  homeOffice?: boolean
 }
 
 export type View = 'daily' | 'projects' | 'stats'
