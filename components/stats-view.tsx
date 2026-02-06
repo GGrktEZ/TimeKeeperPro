@@ -151,17 +151,18 @@ export function StatsView({ entries, projects }: StatsViewProps) {
     // Daily data for charts (last 30 days)
     const thirtyDaysAgo = subDays(today, 29)
     const last30 = eachDayOfInterval({ start: thirtyDaysAgo, end: today })
-    const dailyMap = new Map<string, { work: number; office: number }>()
+    const dailyMap = new Map<string, { work: number; office: number; home: number; inOffice: number }>()
 
     // Last 12 weeks data
-    const weeklyData: { label: string; work: number; office: number }[] = []
+    const weeklyData: { label: string; work: number; office: number; home: number; inOffice: number }[] = []
     for (let w = 11; w >= 0; w--) {
       const ws = startOfWeek(subWeeks(today, w), { weekStartsOn: 1 })
-      const we = endOfWeek(subWeeks(today, w), { weekStartsOn: 1 })
       weeklyData.push({
         label: format(ws, "MMM d"),
         work: 0,
         office: 0,
+        home: 0,
+        inOffice: 0,
       })
     }
 
@@ -254,7 +255,7 @@ export function StatsView({ entries, projects }: StatsViewProps) {
       }
 
       // Daily map for last 30 days
-      dailyMap.set(e.date, { work, office })
+      dailyMap.set(e.date, { work, office, home: homeMins, inOffice: inOfficeMins })
 
       // Weekly chart data
       for (const wd of weeklyData) {
@@ -263,6 +264,8 @@ export function StatsView({ entries, projects }: StatsViewProps) {
         if (isWithinInterval(d, { start: ws, end: we })) {
           wd.work += work / 60
           wd.office += office / 60
+          wd.home += homeMins / 60
+          wd.inOffice += inOfficeMins / 60
         }
       }
     }
@@ -292,12 +295,14 @@ export function StatsView({ entries, projects }: StatsViewProps) {
     // Build 30-day chart data
     const dailyChartData = last30.map(d => {
       const key = format(d, "yyyy-MM-dd")
-      const data = dailyMap.get(key) || { work: 0, office: 0 }
+      const data = dailyMap.get(key) || { work: 0, office: 0, home: 0, inOffice: 0 }
       return {
         date: format(d, "MMM d"),
         day: format(d, "EEE"),
         work: Math.round((data.work / 60) * 10) / 10,
         office: Math.round((data.office / 60) * 10) / 10,
+        home: Math.round((data.home / 60) * 10) / 10,
+        inOffice: Math.round((data.inOffice / 60) * 10) / 10,
       }
     })
 
@@ -362,6 +367,8 @@ export function StatsView({ entries, projects }: StatsViewProps) {
         ...w,
         work: Math.round(w.work * 10) / 10,
         office: Math.round(w.office * 10) / 10,
+        home: Math.round(w.home * 10) / 10,
+        inOffice: Math.round(w.inOffice * 10) / 10,
       })),
     }
   }, [entries, projects, today])
@@ -518,7 +525,8 @@ export function StatsView({ entries, projects }: StatsViewProps) {
             <ChartContainer
               config={{
                 work: { label: "Hours Worked", color: "#4ade80" },
-                office: { label: "Hours in Office", color: "#60a5fa" },
+                home: { label: "Home", color: "#22d3ee" },
+                inOffice: { label: "Office", color: "#60a5fa" },
               }}
               className="h-[220px]"
             >
@@ -528,7 +536,11 @@ export function StatsView({ entries, projects }: StatsViewProps) {
                     <stop offset="5%" stopColor="#4ade80" stopOpacity={0.3} />
                     <stop offset="95%" stopColor="#4ade80" stopOpacity={0} />
                   </linearGradient>
-                  <linearGradient id="officeGradient" x1="0" y1="0" x2="0" y2="1">
+                  <linearGradient id="homeGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#22d3ee" stopOpacity={0.25} />
+                    <stop offset="95%" stopColor="#22d3ee" stopOpacity={0} />
+                  </linearGradient>
+                  <linearGradient id="inOfficeGradient" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="#60a5fa" stopOpacity={0.2} />
                     <stop offset="95%" stopColor="#60a5fa" stopOpacity={0} />
                   </linearGradient>
@@ -537,7 +549,8 @@ export function StatsView({ entries, projects }: StatsViewProps) {
                 <XAxis dataKey="date" tick={{ fontSize: 10, fill: "hsl(0 0% 45%)" }} interval={6} />
                 <YAxis tick={{ fontSize: 10, fill: "hsl(0 0% 45%)" }} />
                 <ChartTooltip content={<ChartTooltipContent />} />
-                <Area type="monotone" dataKey="office" stroke="#60a5fa" fill="url(#officeGradient)" strokeWidth={1.5} />
+                <Area type="monotone" dataKey="inOffice" stroke="#60a5fa" fill="url(#inOfficeGradient)" strokeWidth={1.5} />
+                <Area type="monotone" dataKey="home" stroke="#22d3ee" fill="url(#homeGradient)" strokeWidth={1.5} />
                 <Area type="monotone" dataKey="work" stroke="#4ade80" fill="url(#workGradient)" strokeWidth={2} />
               </AreaChart>
             </ChartContainer>
@@ -551,13 +564,14 @@ export function StatsView({ entries, projects }: StatsViewProps) {
               <BarChart3 className="h-4 w-4 text-accent" />
               Weekly Trends
             </CardTitle>
-            <CardDescription>Last 12 weeks</CardDescription>
+            <CardDescription>Last 12 weeks -- attendance by location</CardDescription>
           </CardHeader>
           <CardContent>
             <ChartContainer
               config={{
+                home: { label: "Home", color: "#22d3ee" },
+                inOffice: { label: "Office", color: "#60a5fa" },
                 work: { label: "Hours Worked", color: "#4ade80" },
-                office: { label: "Hours in Office", color: "#60a5fa" },
               }}
               className="h-[220px]"
             >
@@ -566,7 +580,8 @@ export function StatsView({ entries, projects }: StatsViewProps) {
                 <XAxis dataKey="label" tick={{ fontSize: 10, fill: "hsl(0 0% 45%)" }} interval={2} />
                 <YAxis tick={{ fontSize: 10, fill: "hsl(0 0% 45%)" }} />
                 <ChartTooltip content={<ChartTooltipContent />} />
-                <Bar dataKey="office" fill="#60a5fa" radius={[2, 2, 0, 0]} opacity={0.4} />
+                <Bar dataKey="inOffice" stackId="location" fill="#60a5fa" radius={[0, 0, 0, 0]} opacity={0.5} />
+                <Bar dataKey="home" stackId="location" fill="#22d3ee" radius={[2, 2, 0, 0]} opacity={0.5} />
                 <Bar dataKey="work" fill="#4ade80" radius={[2, 2, 0, 0]} />
               </BarChart>
             </ChartContainer>
@@ -664,6 +679,98 @@ export function StatsView({ entries, projects }: StatsViewProps) {
       </div>
 
       {/* Fun stats and averages */}
+      {/* Location Breakdown */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Home className="h-4 w-4 text-cyan-400" />
+            Location Breakdown
+          </CardTitle>
+          <CardDescription>Home office vs in-office time distribution</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-4 sm:grid-cols-3">
+            {/* Visual bar */}
+            <div className="sm:col-span-3">
+              {stats.allTime.homeMin + stats.allTime.inOfficeMin > 0 ? (
+                <div className="space-y-2">
+                  <div className="flex h-4 w-full overflow-hidden rounded-full">
+                    <div
+                      className="bg-cyan-500 transition-all"
+                      style={{ width: `${Math.round((stats.allTime.homeMin / (stats.allTime.homeMin + stats.allTime.inOfficeMin)) * 100)}%` }}
+                    />
+                    <div
+                      className="bg-blue-500 transition-all"
+                      style={{ width: `${Math.round((stats.allTime.inOfficeMin / (stats.allTime.homeMin + stats.allTime.inOfficeMin)) * 100)}%` }}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between text-xs text-muted-foreground">
+                    <span className="flex items-center gap-1.5">
+                      <span className="inline-block h-2.5 w-2.5 rounded-full bg-cyan-500" />
+                      Home {Math.round((stats.allTime.homeMin / (stats.allTime.homeMin + stats.allTime.inOfficeMin)) * 100)}%
+                    </span>
+                    <span className="flex items-center gap-1.5">
+                      <span className="inline-block h-2.5 w-2.5 rounded-full bg-blue-500" />
+                      Office {Math.round((stats.allTime.inOfficeMin / (stats.allTime.homeMin + stats.allTime.inOfficeMin)) * 100)}%
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                <p className="py-2 text-center text-sm text-muted-foreground">No location data yet</p>
+              )}
+            </div>
+
+            {/* Home stats */}
+            <div className="rounded-lg bg-cyan-500/10 p-3">
+              <div className="flex items-center gap-2">
+                <Home className="h-4 w-4 text-cyan-400" />
+                <p className="text-sm font-medium text-cyan-400">Home</p>
+              </div>
+              <p className="mt-2 text-xl font-bold tabular-nums text-foreground">{mToStr(stats.allTime.homeMin)}</p>
+              <p className="text-xs text-muted-foreground">
+                {stats.allTime.homeOfficeDays} full days, {stats.allTime.mixedDays > 0 ? `${stats.allTime.mixedDays} mixed` : "0 mixed"}
+              </p>
+            </div>
+
+            {/* Office stats */}
+            <div className="rounded-lg bg-blue-500/10 p-3">
+              <div className="flex items-center gap-2">
+                <Building2 className="h-4 w-4 text-blue-400" />
+                <p className="text-sm font-medium text-blue-400">Office</p>
+              </div>
+              <p className="mt-2 text-xl font-bold tabular-nums text-foreground">{mToStr(stats.allTime.inOfficeMin)}</p>
+              <p className="text-xs text-muted-foreground">
+                {stats.allTime.inOfficeDays} full days, {stats.allTime.mixedDays > 0 ? `${stats.allTime.mixedDays} mixed` : "0 mixed"}
+              </p>
+            </div>
+
+            {/* Per-day averages */}
+            <div className="rounded-lg bg-secondary/30 p-3">
+              <p className="text-sm font-medium text-muted-foreground">Per Day</p>
+              <div className="mt-2 space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-muted-foreground">Avg home</span>
+                  <span className="text-sm font-bold tabular-nums text-cyan-400">
+                    {stats.allTime.homeOfficeDays + stats.allTime.mixedDays > 0
+                      ? mToStr(stats.allTime.homeMin / (stats.allTime.homeOfficeDays + stats.allTime.mixedDays))
+                      : "--"}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-muted-foreground">Avg office</span>
+                  <span className="text-sm font-bold tabular-nums text-blue-400">
+                    {stats.allTime.inOfficeDays + stats.allTime.mixedDays > 0
+                      ? mToStr(stats.allTime.inOfficeMin / (stats.allTime.inOfficeDays + stats.allTime.mixedDays))
+                      : "--"}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Averages row */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Card>
           <CardContent className="p-4">
@@ -673,7 +780,7 @@ export function StatsView({ entries, projects }: StatsViewProps) {
         </Card>
         <Card>
           <CardContent className="p-4">
-            <p className="text-xs text-muted-foreground">Avg Office / Day</p>
+            <p className="text-xs text-muted-foreground">Avg Attendance / Day</p>
             <p className="mt-1 text-lg font-bold tabular-nums text-blue-400">{mToStr(stats.avgOfficePerDay)}</p>
           </CardContent>
         </Card>
@@ -736,16 +843,13 @@ export function StatsView({ entries, projects }: StatsViewProps) {
             <div className="rounded-lg bg-secondary/30 p-3">
               <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
                 <Home className="h-3 w-3" />
-                Location Split
+                Mixed Days
               </p>
-              <div className="mt-1 flex items-baseline gap-2">
-                <span className="text-lg font-bold tabular-nums text-cyan-400">{stats.allTime.homeOfficeDays + stats.allTime.mixedDays}</span>
-                <span className="text-xs text-muted-foreground">home</span>
-                <span className="text-lg font-bold tabular-nums text-blue-400">{stats.allTime.inOfficeDays + stats.allTime.mixedDays}</span>
-                <span className="text-xs text-muted-foreground">office</span>
-              </div>
+              <p className="mt-1 text-lg font-bold tabular-nums text-purple-400">{stats.allTime.mixedDays}</p>
               <p className="text-xs text-muted-foreground">
-                {stats.allTime.mixedDays > 0 ? `${stats.allTime.mixedDays} mixed days` : `${mToStr(stats.allTime.homeMin)} at home, ${mToStr(stats.allTime.inOfficeMin)} in office`}
+                {stats.allTime.daysWorked > 0
+                  ? `${Math.round((stats.allTime.mixedDays / stats.allTime.daysWorked) * 100)}% of work days split`
+                  : "No data yet"}
               </p>
             </div>
             <div className="rounded-lg bg-secondary/30 p-3">
