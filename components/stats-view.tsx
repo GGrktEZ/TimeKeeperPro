@@ -5,7 +5,8 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart"
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
-  PieChart, Pie, Cell, AreaChart, Area,
+  PieChart, Pie, Cell,
+  AreaChart, Area,
 } from "recharts"
 import {
   Briefcase, Building2, CalendarDays, TrendingUp,
