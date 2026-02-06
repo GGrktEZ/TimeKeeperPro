@@ -7,13 +7,15 @@ import { DailyView } from "@/components/daily-view"
 import { ProjectsView } from "@/components/projects-view"
 import { StatsView } from "@/components/stats-view"
 import { UndoBar } from "@/components/undo-bar"
-import { useProjects, useDayEntries } from "@/lib/store"
+import { useProjects, useDayEntries, useSettings } from "@/lib/store"
 import { useUndo } from "@/lib/use-undo"
 import type { View, DayEntry, DayProjectEntry, Project } from "@/lib/types"
 
 export default function HomePage() {
   const [currentView, setCurrentView] = useState<View>("daily")
   const [selectedDate, setSelectedDate] = useState(() => format(new Date(), "yyyy-MM-dd"))
+
+  const { settings, isLoaded: settingsLoaded, toggleRoundToFive } = useSettings()
 
   const {
     projects,
@@ -177,7 +179,7 @@ export default function HomePage() {
     [handleUpdateEntry, snapshot]
   )
 
-  const isLoading = !projectsLoaded || !entriesLoaded
+  const isLoading = !projectsLoaded || !entriesLoaded || !settingsLoaded
 
   if (isLoading) {
     return (
@@ -200,6 +202,8 @@ export default function HomePage() {
         projects={projects}
         currentEntry={currentEntry}
         onImport={handleImport}
+        roundToFive={settings.roundToFive}
+        onToggleRoundToFive={toggleRoundToFive}
       />
       
       <main className="mx-auto max-w-7xl px-4 py-6">
@@ -215,6 +219,7 @@ export default function HomePage() {
             onUpdateProject={handleUpdateDayProject}
             onRemoveProject={handleRemoveDayProject}
             onReorderProjects={handleReorderProjects}
+            roundToFive={settings.roundToFive}
           />
         ) : currentView === "projects" ? (
           <ProjectsView

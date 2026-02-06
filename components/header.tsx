@@ -1,7 +1,8 @@
 "use client"
 
-import { Clock, FolderKanban, BarChart3 } from "lucide-react"
+import { Clock, FolderKanban, BarChart3, Timer } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { DataManagementDialog } from "./data-management-dialog"
 import type { View, DayEntry, Project } from "@/lib/types"
 
@@ -13,6 +14,8 @@ interface HeaderProps {
   projects: Project[]
   currentEntry: DayEntry | undefined
   onImport: (data: { entries: DayEntry[]; projects: Project[] }) => void
+  roundToFive: boolean
+  onToggleRoundToFive: () => void
 }
 
 export function Header({
@@ -23,6 +26,8 @@ export function Header({
   projects,
   currentEntry,
   onImport,
+  roundToFive,
+  onToggleRoundToFive,
 }: HeaderProps) {
   return (
     <header className="border-b border-border bg-card">
@@ -39,6 +44,24 @@ export function Header({
           </div>
 
           <div className="flex items-center gap-2">
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={onToggleRoundToFive}
+                    className={`gap-1.5 bg-transparent ${roundToFive ? "border-accent/50 text-accent" : ""}`}
+                  >
+                    <Timer className="h-4 w-4" />
+                    <span className="hidden sm:inline">:05</span>
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Round to nearest 5 minutes: {roundToFive ? "ON" : "OFF"}</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
             <DataManagementDialog
               selectedDate={selectedDate}
               entries={entries}

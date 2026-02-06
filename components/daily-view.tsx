@@ -17,6 +17,7 @@ interface DailyViewProps {
   onUpdateProject: (projectEntryId: string, data: Partial<DayProjectEntry>) => void
   onRemoveProject: (projectEntryId: string) => void
   onReorderProjects: (fromIndex: number, toIndex: number) => void
+  roundToFive: boolean
 }
 
 export function DailyView({
@@ -30,6 +31,7 @@ export function DailyView({
   onUpdateProject,
   onRemoveProject,
   onReorderProjects,
+  roundToFive,
 }: DailyViewProps) {
   return (
     <div className="space-y-6">
@@ -50,6 +52,7 @@ export function DailyView({
           onUpdate={onUpdateEntry}
           dayProjects={entry?.projects ?? []}
           onUpdateProject={onUpdateProject}
+          roundToFive={roundToFive}
         />
         <DayProjects
           projects={projects}
@@ -58,6 +61,7 @@ export function DailyView({
           onUpdateProject={onUpdateProject}
           onRemoveProject={onRemoveProject}
           onReorderProjects={onReorderProjects}
+          roundToFive={roundToFive}
         />
       </div>
     </div>

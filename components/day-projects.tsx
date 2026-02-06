@@ -11,6 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { ProjectSelector } from "./project-selector"
 import { AutoResizeTextarea } from "@/components/ui/auto-resize-textarea"
 import type { Project, DayProjectEntry, WorkSession } from "@/lib/types"
+import { getCurrentTimeString } from "@/lib/utils"
 
 interface DayProjectsProps {
   projects: Project[]
@@ -19,6 +20,7 @@ interface DayProjectsProps {
   onUpdateProject: (projectEntryId: string, data: Partial<DayProjectEntry>) => void
   onRemoveProject: (projectEntryId: string) => void
   onReorderProjects: (fromIndex: number, toIndex: number) => void
+  roundToFive: boolean
 }
 
 function generateId(): string {
@@ -149,12 +151,14 @@ function WorkSessionItem({
   projectEntryId,
   sessions,
   onUpdate,
+  roundToFive,
 }: {
   session: WorkSession
   index: number
   projectEntryId: string
   sessions: WorkSession[]
   onUpdate: (projectEntryId: string, data: Partial<DayProjectEntry>) => void
+  roundToFive: boolean
 }) {
   const [isExpanded, setIsExpanded] = useState(false)
   const isActive = session.start && !session.end
@@ -169,8 +173,7 @@ function WorkSessionItem({
   }
 
   const setCurrentTime = (field: 'start' | 'end') => {
-    const now = new Date()
-    const timeString = now.toTimeString().slice(0, 5)
+    const timeString = getCurrentTimeString(roundToFive)
     updateSession(field, timeString)
   }
 
@@ -304,6 +307,7 @@ export function DayProjects({
   onUpdateProject,
   onRemoveProject,
   onReorderProjects,
+  roundToFive,
 }: DayProjectsProps) {
   const getProject = (projectId: string) => projects.find((p) => p.id === projectId)
   const selectedProjectIds = dayProjects.map((dp) => dp.projectId)
@@ -358,8 +362,7 @@ export function DayProjects({
 
   // Start a new session with current time
   const startNewSession = (projectEntryId: string, currentSessions: WorkSession[]) => {
-    const now = new Date()
-    const timeString = now.toTimeString().slice(0, 5)
+    const timeString = getCurrentTimeString(roundToFive)
     const newSession: WorkSession = {
       id: generateId(),
       start: timeString,
@@ -372,8 +375,7 @@ export function DayProjects({
 
   // End the active session
   const endActiveSession = (projectEntryId: string, currentSessions: WorkSession[]) => {
-    const now = new Date()
-    const timeString = now.toTimeString().slice(0, 5)
+    const timeString = getCurrentTimeString(roundToFive)
     const updatedSessions = currentSessions.map((s) =>
       s.start && !s.end ? { ...s, end: timeString } : s
     )
@@ -514,6 +516,7 @@ export function DayProjects({
                           projectEntryId={dayProject.id}
                           sessions={sessions}
                           onUpdate={onUpdateProject}
+                          roundToFive={roundToFive}
                         />
                       ))}
                     </div>
