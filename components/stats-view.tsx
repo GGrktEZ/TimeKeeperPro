@@ -9,7 +9,7 @@ import {
 } from "recharts"
 import {
   Briefcase, Building2, CalendarDays, TrendingUp,
-  Flame, Target, BarChart3, Zap, CalendarRange,
+  Flame, Target, BarChart3, Zap, CalendarRange, Home,
 } from "lucide-react"
 import {
   startOfWeek, endOfWeek, startOfMonth, endOfMonth, parseISO, isWithinInterval,
@@ -101,7 +101,7 @@ export function StatsView({ entries, projects }: StatsViewProps) {
   const stats = useMemo(() => {
     const allTime = {
       workMin: 0, officeMin: 0, lunchMin: 0, breakMin: 0,
-      daysWorked: 0, totalSessions: 0,
+      daysWorked: 0, totalSessions: 0, homeOfficeDays: 0,
     }
     const weekStart = startOfWeek(today, { weekStartsOn: 1 })
     const weekEnd = endOfWeek(today, { weekStartsOn: 1 })
@@ -159,6 +159,7 @@ export function StatsView({ entries, projects }: StatsViewProps) {
       if (work > 0 || office > 0) {
         allTime.daysWorked++
         streakCheck.add(e.date)
+        if (e.homeOffice) allTime.homeOfficeDays++
       }
       allTime.workMin += work
       allTime.officeMin += office
@@ -681,6 +682,18 @@ export function StatsView({ entries, projects }: StatsViewProps) {
               <p className="text-xs text-muted-foreground">Avg Session Length</p>
               <p className="mt-1 text-lg font-bold tabular-nums text-blue-400">
                 {stats.allTime.totalSessions > 0 ? mToStr(stats.allTime.workMin / stats.allTime.totalSessions) : "0h 0m"}
+              </p>
+            </div>
+            <div className="rounded-lg bg-secondary/30 p-3">
+              <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Home className="h-3 w-3" />
+                Home Office Days
+              </p>
+              <p className="mt-1 text-lg font-bold tabular-nums text-cyan-400">{stats.allTime.homeOfficeDays}</p>
+              <p className="text-xs text-muted-foreground">
+                {stats.allTime.daysWorked > 0
+                  ? `${Math.round((stats.allTime.homeOfficeDays / stats.allTime.daysWorked) * 100)}% of work days`
+                  : "No data yet"}
               </p>
             </div>
             <div className="rounded-lg bg-secondary/30 p-3">

@@ -1,6 +1,6 @@
 "use client"
 
-import { Clock, LogIn, LogOut, UtensilsCrossed, Coffee, Plus, Trash2, Building2, Briefcase } from "lucide-react"
+import { Clock, LogIn, LogOut, UtensilsCrossed, Coffee, Plus, Trash2, Building2, Briefcase, Home } from "lucide-react"
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -173,6 +173,7 @@ export function TimeEntry({ entry, selectedDate, onUpdate, dayProjects, onUpdate
   const lunchStart = entry?.lunchStart ?? ""
   const lunchEnd = entry?.lunchEnd ?? ""
   const breaks = entry?.breaks ?? []
+  const homeOffice = entry?.homeOffice ?? false
   const scheduleNotes = entry?.scheduleNotes ?? ""
 
   // Check if we're viewing today and currently clocked in
@@ -321,7 +322,7 @@ export function TimeEntry({ entry, selectedDate, onUpdate, dayProjects, onUpdate
     if (!isClockedIn) return null
     if (isOnLunch) return "On Lunch"
     if (isOnBreak) return "On Break"
-    return "In Office"
+    return homeOffice ? "Home Office" : "In Office"
   }
 
   const statusText = getStatusText()
@@ -377,8 +378,8 @@ export function TimeEntry({ entry, selectedDate, onUpdate, dayProjects, onUpdate
               <div className={`rounded-lg px-4 py-3 ${shouldShowLiveTime && isClockedIn ? "bg-blue-500/10 ring-1 ring-blue-500/30" : "bg-blue-500/10"}`}>
                 <div className="flex items-center justify-between">
                   <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                    <Building2 className="h-3.5 w-3.5" />
-                    Hours in Office
+                    {homeOffice ? <Home className="h-3.5 w-3.5" /> : <Building2 className="h-3.5 w-3.5" />}
+                    {homeOffice ? "Hours at Home" : "Hours in Office"}
                   </p>
                   {shouldShowLiveTime && isClockedIn && (
                     <span className="flex items-center gap-1 text-xs text-blue-400">
@@ -448,6 +449,25 @@ export function TimeEntry({ entry, selectedDate, onUpdate, dayProjects, onUpdate
             </div>
           </div>
         </div>
+
+        {/* Home Office Toggle */}
+        <button
+          type="button"
+          onClick={() => onUpdate({ homeOffice: !homeOffice })}
+          className={`flex w-full items-center gap-3 rounded-lg border px-4 py-3 text-left transition-colors ${
+            homeOffice
+              ? "border-accent/40 bg-accent/10 text-accent"
+              : "border-border/50 bg-secondary/30 text-muted-foreground hover:bg-secondary/50"
+          }`}
+        >
+          <Home className="h-4 w-4 shrink-0" />
+          <span className="flex-1 text-sm font-medium">Home Office</span>
+          <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+            homeOffice ? "bg-accent/20 text-accent" : "bg-secondary text-muted-foreground"
+          }`}>
+            {homeOffice ? "Yes" : "No"}
+          </span>
+        </button>
 
         {/* Lunch Break */}
         <div className="space-y-3">

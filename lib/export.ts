@@ -9,6 +9,7 @@ export interface ExportedDayEntry {
   lunchStart: string | null
   lunchEnd: string | null
   breaks: { start: string; end: string }[]
+  homeOffice: boolean
   hoursWorked: string | null
   hoursInOffice: string | null
   scheduleNotes: string
@@ -107,6 +108,7 @@ function transformEntry(entry: DayEntry, projects: Project[]): ExportedDayEntry 
     lunchStart: entry.lunchStart,
     lunchEnd: entry.lunchEnd,
     breaks: (entry.breaks ?? []).filter(b => b.start && b.end).map(b => ({ start: b.start, end: b.end })),
+    homeOffice: entry.homeOffice ?? false,
     hoursWorked: projectMinutes > 0 ? minutesToHoursString(projectMinutes) : null,
     hoursInOffice: officeMinutes ? minutesToHoursString(officeMinutes) : null,
     scheduleNotes: entry.scheduleNotes,

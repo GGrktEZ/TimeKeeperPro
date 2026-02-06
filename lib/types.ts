@@ -39,6 +39,7 @@ export interface DayEntry {
   lunchStart: string | null
   lunchEnd: string | null
   breaks: Break[]
+  homeOffice: boolean
   scheduleNotes: string
   projects: DayProjectEntry[]
   createdAt: string
