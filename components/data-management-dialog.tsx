@@ -97,6 +97,12 @@ export function DataManagementDialog({
             start: b.start,
             end: b.end,
           })),
+          locationBlocks: ((entry as any).locationBlocks ?? []).map((lb: any, lbIdx: number) => ({
+            id: `loc-${Date.now()}-${idx}-${lbIdx}`,
+            location: lb.location ?? 'office',
+            start: lb.start ?? "",
+            end: lb.end ?? "",
+          })),
           scheduleNotes: entry.scheduleNotes ?? "",
           projects: entry.projects.map((p, pIdx) => ({
             id: `proj-${Date.now()}-${idx}-${pIdx}`,

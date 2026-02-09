@@ -9,13 +9,13 @@ import {
 } from "recharts"
 import {
   Briefcase, Building2, CalendarDays, TrendingUp,
-  Flame, Target, BarChart3, Zap, CalendarRange,
+  Flame, Target, BarChart3, Zap, CalendarRange, Home,
 } from "lucide-react"
 import {
   startOfWeek, endOfWeek, startOfMonth, endOfMonth, parseISO, isWithinInterval,
   format, subDays, eachDayOfInterval, getDay, subWeeks,
 } from "date-fns"
-import type { DayEntry, Project } from "@/lib/types"
+import type { DayEntry, Project, LocationBlock } from "@/lib/types"
 
 interface StatsViewProps {
   entries: DayEntry[]
@@ -69,6 +69,23 @@ function entryLunchMinutes(entry: DayEntry): number {
   return d > 0 ? d : 0
 }
 
+function entryLocationMinutes(entry: DayEntry, location: 'office' | 'home'): number {
+  const blocks = entry.locationBlocks ?? []
+  if (blocks.length === 0) {
+    // Legacy: if no blocks, all clocked time counts as office
+    return location === 'office' ? entryOfficeMinutes(entry) : 0
+  }
+  let total = 0
+  for (const b of blocks) {
+    if (b.location !== location || !b.start || !b.end) continue
+    const [sH, sM] = b.start.split(":").map(Number)
+    const [eH, eM] = b.end.split(":").map(Number)
+    const d = (eH * 60 + eM) - (sH * 60 + sM)
+    if (d > 0) total += d
+  }
+  return total
+}
+
 function entryBreakMinutes(entry: DayEntry): number {
   let total = 0
   for (const b of entry.breaks ?? []) {
@@ -100,7 +117,7 @@ export function StatsView({ entries, projects }: StatsViewProps) {
 
   const stats = useMemo(() => {
     const allTime = {
-      workMin: 0, officeMin: 0, lunchMin: 0, breakMin: 0,
+      workMin: 0, officeMin: 0, homeMin: 0, lunchMin: 0, breakMin: 0,
       daysWorked: 0, totalSessions: 0,
     }
     const weekStart = startOfWeek(today, { weekStartsOn: 1 })
@@ -150,18 +167,20 @@ export function StatsView({ entries, projects }: StatsViewProps) {
 
     for (const e of sorted) {
       const work = entryWorkMinutes(e)
-      const office = entryOfficeMinutes(e)
+      const office = entryLocationMinutes(e, 'office')
+      const home = entryLocationMinutes(e, 'home')
       const lunch = entryLunchMinutes(e)
       const breaks = entryBreakMinutes(e)
       const sessCount = (e.projects ?? []).reduce((acc, p) => acc + (p.workSessions?.filter(s => s.start && s.end).length ?? 0), 0)
       const d = parseISO(e.date)
 
-      if (work > 0 || office > 0) {
+      if (work > 0 || office > 0 || home > 0) {
         allTime.daysWorked++
         streakCheck.add(e.date)
       }
       allTime.workMin += work
       allTime.officeMin += office
+      allTime.homeMin += home
       allTime.lunchMin += lunch
       allTime.breakMin += breaks
       allTime.totalSessions += sessCount
@@ -298,6 +317,7 @@ export function StatsView({ entries, projects }: StatsViewProps) {
     // Average work per day
     const avgWorkPerDay = allTime.daysWorked > 0 ? allTime.workMin / allTime.daysWorked : 0
     const avgOfficePerDay = allTime.daysWorked > 0 ? allTime.officeMin / allTime.daysWorked : 0
+    const avgHomePerDay = allTime.daysWorked > 0 ? allTime.homeMin / allTime.daysWorked : 0
     const avgLunchPerDay = allTime.lunchMin > 0 && allTime.daysWorked > 0 ? allTime.lunchMin / allTime.daysWorked : 0
 
     return {
@@ -307,7 +327,7 @@ export function StatsView({ entries, projects }: StatsViewProps) {
       projectPieData, dayOfWeekAvg,
       avgClockIn, avgClockOut,
       bestDayDate, bestDayMins,
-      avgWorkPerDay, avgOfficePerDay, avgLunchPerDay,
+      avgWorkPerDay, avgOfficePerDay, avgHomePerDay, avgLunchPerDay,
       weeklyData: weeklyData.map(w => ({
         ...w,
         work: Math.round(w.work * 10) / 10,
@@ -614,7 +634,7 @@ export function StatsView({ entries, projects }: StatsViewProps) {
       </div>
 
       {/* Fun stats and averages */}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         <Card>
           <CardContent className="p-4">
             <p className="text-xs text-muted-foreground">Avg Work / Day</p>
@@ -625,6 +645,12 @@ export function StatsView({ entries, projects }: StatsViewProps) {
           <CardContent className="p-4">
             <p className="text-xs text-muted-foreground">Avg Office / Day</p>
             <p className="mt-1 text-lg font-bold tabular-nums text-blue-400">{mToStr(stats.avgOfficePerDay)}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <p className="text-xs text-muted-foreground">Avg Home / Day</p>
+            <p className="mt-1 text-lg font-bold tabular-nums text-violet-400">{mToStr(stats.avgHomePerDay)}</p>
           </CardContent>
         </Card>
         <Card>
@@ -692,6 +718,23 @@ export function StatsView({ entries, projects }: StatsViewProps) {
               </p>
               <p className="text-xs text-muted-foreground">Time spent actively working</p>
             </div>
+            {stats.allTime.homeMin > 0 && (
+              <div className="rounded-lg bg-secondary/30 p-3">
+                <p className="text-xs text-muted-foreground">Office / Home Split</p>
+                <div className="mt-1 flex items-center gap-2">
+                  <p className="text-lg font-bold tabular-nums text-blue-400">{mToStr(stats.allTime.officeMin)}</p>
+                  <span className="text-xs text-muted-foreground">/</span>
+                  <p className="text-lg font-bold tabular-nums text-violet-400">{mToStr(stats.allTime.homeMin)}</p>
+                </div>
+                <div className="mt-1.5 flex h-2 overflow-hidden rounded-full">
+                  <div className="bg-blue-400" style={{ width: `${Math.round((stats.allTime.officeMin / (stats.allTime.officeMin + stats.allTime.homeMin)) * 100)}%` }} />
+                  <div className="bg-violet-400" style={{ width: `${Math.round((stats.allTime.homeMin / (stats.allTime.officeMin + stats.allTime.homeMin)) * 100)}%` }} />
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {Math.round((stats.allTime.officeMin / (stats.allTime.officeMin + stats.allTime.homeMin)) * 100)}% office / {Math.round((stats.allTime.homeMin / (stats.allTime.officeMin + stats.allTime.homeMin)) * 100)}% home
+                </p>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>

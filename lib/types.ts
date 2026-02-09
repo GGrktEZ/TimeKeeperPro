@@ -31,6 +31,15 @@ export interface Break {
   end: string
 }
 
+export type LocationType = 'office' | 'home'
+
+export interface LocationBlock {
+  id: string
+  location: LocationType
+  start: string
+  end: string
+}
+
 export interface DayEntry {
   id: string
   date: string
@@ -39,6 +48,7 @@ export interface DayEntry {
   lunchStart: string | null
   lunchEnd: string | null
   breaks: Break[]
+  locationBlocks: LocationBlock[]
   scheduleNotes: string
   projects: DayProjectEntry[]
   createdAt: string
