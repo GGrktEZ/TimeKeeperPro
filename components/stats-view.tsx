@@ -384,7 +384,17 @@ export function StatsView({ entries, projects }: StatsViewProps) {
             <div>
               <p className="text-xs text-muted-foreground">This Week</p>
               <p className="text-lg font-bold tabular-nums text-foreground">{mToStr(stats.week.workMin)}</p>
-              <p className="text-xs tabular-nums text-muted-foreground">{stats.week.days} days</p>
+              <p className="text-xs tabular-nums text-muted-foreground">
+                {stats.week.days} days
+                {(stats.week.officeMin > 0 || stats.week.homeMin > 0) && (
+                  <span className="ml-1">
+                    (<span className="text-blue-400">{mToStr(stats.week.officeMin)}</span>
+                    {stats.week.homeMin > 0 && (
+                      <> / <span className="text-violet-400">{mToStr(stats.week.homeMin)}</span></>
+                    )})
+                  </span>
+                )}
+              </p>
             </div>
           </CardContent>
         </Card>
@@ -396,7 +406,17 @@ export function StatsView({ entries, projects }: StatsViewProps) {
             <div>
               <p className="text-xs text-muted-foreground">This Month</p>
               <p className="text-lg font-bold tabular-nums text-foreground">{mToStr(stats.month.workMin)}</p>
-              <p className="text-xs tabular-nums text-muted-foreground">{stats.month.days} days</p>
+              <p className="text-xs tabular-nums text-muted-foreground">
+                {stats.month.days} days
+                {(stats.month.officeMin > 0 || stats.month.homeMin > 0) && (
+                  <span className="ml-1">
+                    (<span className="text-blue-400">{mToStr(stats.month.officeMin)}</span>
+                    {stats.month.homeMin > 0 && (
+                      <> / <span className="text-violet-400">{mToStr(stats.month.homeMin)}</span></>
+                    )})
+                  </span>
+                )}
+              </p>
             </div>
           </CardContent>
         </Card>
@@ -405,14 +425,21 @@ export function StatsView({ entries, projects }: StatsViewProps) {
             <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-violet-500/15">
               <Home className="h-5 w-5 text-violet-400" />
             </div>
-            <div>
-              <p className="text-xs text-muted-foreground">Office / Home</p>
-              <p className="text-lg font-bold tabular-nums text-foreground">
-                {mToStr(stats.month.officeMin)}{" "}
-                <span className="text-xs font-normal text-muted-foreground">/</span>{" "}
-                <span className="text-violet-400">{mToStr(stats.month.homeMin)}</span>
-              </p>
-              <p className="text-xs tabular-nums text-muted-foreground">this month</p>
+            <div className="flex-1">
+              <p className="text-xs text-muted-foreground">Location Split</p>
+              {(stats.allTime.officeMin + stats.allTime.homeMin) > 0 ? (
+                <>
+                  <div className="mt-1 flex h-2.5 overflow-hidden rounded-full">
+                    <div className="bg-blue-400 transition-all" style={{ width: `${Math.round((stats.allTime.officeMin / (stats.allTime.officeMin + stats.allTime.homeMin)) * 100)}%` }} />
+                    <div className="bg-violet-400 transition-all" style={{ width: `${Math.round((stats.allTime.homeMin / (stats.allTime.officeMin + stats.allTime.homeMin)) * 100)}%` }} />
+                  </div>
+                  <p className="mt-1 text-xs tabular-nums text-muted-foreground">
+                    <span className="text-blue-400">{Math.round((stats.allTime.officeMin / (stats.allTime.officeMin + stats.allTime.homeMin)) * 100)}%</span> office / <span className="text-violet-400">{Math.round((stats.allTime.homeMin / (stats.allTime.officeMin + stats.allTime.homeMin)) * 100)}%</span> home
+                  </p>
+                </>
+              ) : (
+                <p className="mt-1 text-sm tabular-nums text-muted-foreground">No data yet</p>
+              )}
             </div>
           </CardContent>
         </Card>
