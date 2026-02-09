@@ -1,4 +1,4 @@
-import type { DayEntry, Project, WorkSession } from "./types"
+import type { DayEntry, Project, WorkSession, LocationBlock } from "./types"
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, parseISO } from "date-fns"
 
 export interface ExportedDayEntry {
@@ -9,8 +9,10 @@ export interface ExportedDayEntry {
   lunchStart: string | null
   lunchEnd: string | null
   breaks: { start: string; end: string }[]
+  locationBlocks: { location: string; start: string; end: string }[]
   hoursWorked: string | null
   hoursInOffice: string | null
+  hoursAtHome: string | null
   scheduleNotes: string
   projects: {
     name: string
@@ -95,9 +97,24 @@ function minutesToHoursString(minutes: number): string {
   return `${h}h ${m}m`
 }
 
+function calculateLocationMinutes(blocks: LocationBlock[], location: 'office' | 'home'): number {
+  let total = 0
+  for (const b of blocks) {
+    if (b.location !== location || !b.start || !b.end) continue
+    const [sH, sM] = b.start.split(":").map(Number)
+    const [eH, eM] = b.end.split(":").map(Number)
+    const d = (eH * 60 + eM) - (sH * 60 + sM)
+    if (d > 0) total += d
+  }
+  return total
+}
+
 function transformEntry(entry: DayEntry, projects: Project[]): ExportedDayEntry {
   const projectMinutes = calculateProjectMinutes(entry)
   const officeMinutes = calculateOfficeMinutes(entry)
+  const blocks = entry.locationBlocks ?? []
+  const homeMinutes = blocks.length > 0 ? calculateLocationMinutes(blocks, 'home') : 0
+  const locOfficeMinutes = blocks.length > 0 ? calculateLocationMinutes(blocks, 'office') : (officeMinutes ?? 0)
   
   return {
     date: entry.date,
@@ -107,8 +124,10 @@ function transformEntry(entry: DayEntry, projects: Project[]): ExportedDayEntry 
     lunchStart: entry.lunchStart,
     lunchEnd: entry.lunchEnd,
     breaks: (entry.breaks ?? []).filter(b => b.start && b.end).map(b => ({ start: b.start, end: b.end })),
+    locationBlocks: blocks.filter(b => b.start && b.end).map(b => ({ location: b.location, start: b.start, end: b.end })),
     hoursWorked: projectMinutes > 0 ? minutesToHoursString(projectMinutes) : null,
-    hoursInOffice: officeMinutes ? minutesToHoursString(officeMinutes) : null,
+    hoursInOffice: locOfficeMinutes > 0 ? minutesToHoursString(locOfficeMinutes) : null,
+    hoursAtHome: homeMinutes > 0 ? minutesToHoursString(homeMinutes) : null,
     scheduleNotes: entry.scheduleNotes,
     projects: entry.projects.map((p) => {
       const project = projects.find((proj) => proj.id === p.projectId)

@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import type { Project, DayEntry, DayProjectEntry } from "./types"
+import type { Project, DayEntry, DayProjectEntry, LocationBlock } from "./types"
 
 const PROJECTS_KEY = "timetrack-projects"
 const ENTRIES_KEY = "timetrack-entries"
@@ -133,7 +133,13 @@ export function useDayEntries() {
     const stored = localStorage.getItem(ENTRIES_KEY)
     if (stored) {
       try {
-        setEntries(JSON.parse(stored))
+        const parsed: DayEntry[] = JSON.parse(stored)
+        // Migrate old entries that don't have locationBlocks
+        const migrated = parsed.map((e) => ({
+          ...e,
+          locationBlocks: e.locationBlocks ?? [],
+        }))
+        setEntries(migrated)
       } catch {
         setEntries([])
       }
@@ -171,6 +177,7 @@ export function useDayEntries() {
           lunchStart: data.lunchStart ?? null,
           lunchEnd: data.lunchEnd ?? null,
           breaks: data.breaks ?? [],
+          locationBlocks: data.locationBlocks ?? [],
           scheduleNotes: data.scheduleNotes ?? "",
           projects: data.projects ?? [],
           createdAt: new Date().toISOString(),
@@ -284,6 +291,7 @@ export function useDayEntries() {
               lunchStart: entry.lunchStart || existingEntry.lunchStart,
               lunchEnd: entry.lunchEnd || existingEntry.lunchEnd,
               breaks: entry.breaks.length > 0 ? entry.breaks : existingEntry.breaks,
+              locationBlocks: (entry.locationBlocks ?? []).length > 0 ? entry.locationBlocks : (existingEntry.locationBlocks ?? []),
               scheduleNotes: entry.scheduleNotes || existingEntry.scheduleNotes,
               projects: mappedProjects.length > 0 ? mappedProjects : existingEntry.projects,
               updatedAt: new Date().toISOString(),
@@ -293,6 +301,7 @@ export function useDayEntries() {
           // Add new entry
           result.push({
             ...entry,
+            locationBlocks: entry.locationBlocks ?? [],
             projects: mappedProjects,
           })
         }
