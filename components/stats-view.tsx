@@ -125,8 +125,8 @@ export function StatsView({ entries, projects }: StatsViewProps) {
     const monthStart = startOfMonth(today)
     const monthEnd = endOfMonth(today)
 
-    const week = { workMin: 0, officeMin: 0, days: 0 }
-    const month = { workMin: 0, officeMin: 0, days: 0 }
+    const week = { workMin: 0, officeMin: 0, homeMin: 0, days: 0 }
+    const month = { workMin: 0, officeMin: 0, homeMin: 0, days: 0 }
 
     // Per-project totals
     const projectWork: Record<string, number> = {}
@@ -136,17 +136,17 @@ export function StatsView({ entries, projects }: StatsViewProps) {
     // Daily data for charts (last 30 days)
     const thirtyDaysAgo = subDays(today, 29)
     const last30 = eachDayOfInterval({ start: thirtyDaysAgo, end: today })
-    const dailyMap = new Map<string, { work: number; office: number }>()
+    const dailyMap = new Map<string, { work: number; office: number; home: number }>()
 
     // Last 12 weeks data
-    const weeklyData: { label: string; work: number; office: number }[] = []
+    const weeklyData: { label: string; work: number; office: number; home: number }[] = []
     for (let w = 11; w >= 0; w--) {
       const ws = startOfWeek(subWeeks(today, w), { weekStartsOn: 1 })
-      const we = endOfWeek(subWeeks(today, w), { weekStartsOn: 1 })
       weeklyData.push({
         label: format(ws, "MMM d"),
         work: 0,
         office: 0,
+        home: 0,
       })
     }
 
@@ -214,16 +214,18 @@ export function StatsView({ entries, projects }: StatsViewProps) {
       if (isWithinInterval(d, { start: weekStart, end: weekEnd })) {
         week.workMin += work
         week.officeMin += office
-        if (work > 0 || office > 0) week.days++
+        week.homeMin += home
+        if (work > 0 || office > 0 || home > 0) week.days++
       }
       if (isWithinInterval(d, { start: monthStart, end: monthEnd })) {
         month.workMin += work
         month.officeMin += office
-        if (work > 0 || office > 0) month.days++
+        month.homeMin += home
+        if (work > 0 || office > 0 || home > 0) month.days++
       }
 
       // Daily map for last 30 days
-      dailyMap.set(e.date, { work, office })
+      dailyMap.set(e.date, { work, office, home })
 
       // Weekly chart data
       for (const wd of weeklyData) {
@@ -232,6 +234,7 @@ export function StatsView({ entries, projects }: StatsViewProps) {
         if (isWithinInterval(d, { start: ws, end: we })) {
           wd.work += work / 60
           wd.office += office / 60
+          wd.home += home / 60
         }
       }
     }
@@ -261,12 +264,13 @@ export function StatsView({ entries, projects }: StatsViewProps) {
     // Build 30-day chart data
     const dailyChartData = last30.map(d => {
       const key = format(d, "yyyy-MM-dd")
-      const data = dailyMap.get(key) || { work: 0, office: 0 }
+      const data = dailyMap.get(key) || { work: 0, office: 0, home: 0 }
       return {
         date: format(d, "MMM d"),
         day: format(d, "EEE"),
         work: Math.round((data.work / 60) * 10) / 10,
         office: Math.round((data.office / 60) * 10) / 10,
+        home: Math.round((data.home / 60) * 10) / 10,
       }
     })
 
@@ -332,6 +336,7 @@ export function StatsView({ entries, projects }: StatsViewProps) {
         ...w,
         work: Math.round(w.work * 10) / 10,
         office: Math.round(w.office * 10) / 10,
+        home: Math.round(w.home * 10) / 10,
       })),
     }
   }, [entries, projects, today])
@@ -370,7 +375,7 @@ export function StatsView({ entries, projects }: StatsViewProps) {
   return (
     <div className="space-y-6">
       {/* Top summary row */}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         <Card>
           <CardContent className="flex items-center gap-3 p-4">
             <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-accent/15">
@@ -392,6 +397,22 @@ export function StatsView({ entries, projects }: StatsViewProps) {
               <p className="text-xs text-muted-foreground">This Month</p>
               <p className="text-lg font-bold tabular-nums text-foreground">{mToStr(stats.month.workMin)}</p>
               <p className="text-xs tabular-nums text-muted-foreground">{stats.month.days} days</p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="flex items-center gap-3 p-4">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-violet-500/15">
+              <Home className="h-5 w-5 text-violet-400" />
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Office / Home</p>
+              <p className="text-lg font-bold tabular-nums text-foreground">
+                {mToStr(stats.month.officeMin)}{" "}
+                <span className="text-xs font-normal text-muted-foreground">/</span>{" "}
+                <span className="text-violet-400">{mToStr(stats.month.homeMin)}</span>
+              </p>
+              <p className="text-xs tabular-nums text-muted-foreground">this month</p>
             </div>
           </CardContent>
         </Card>
@@ -482,13 +503,14 @@ export function StatsView({ entries, projects }: StatsViewProps) {
               <TrendingUp className="h-4 w-4 text-accent" />
               Last 30 Days
             </CardTitle>
-            <CardDescription>Daily hours worked vs in office</CardDescription>
+            <CardDescription>Daily hours worked, office, and home</CardDescription>
           </CardHeader>
           <CardContent>
             <ChartContainer
               config={{
                 work: { label: "Hours Worked", color: "#4ade80" },
-                office: { label: "Hours in Office", color: "#60a5fa" },
+                office: { label: "In Office", color: "#60a5fa" },
+                home: { label: "At Home", color: "#a78bfa" },
               }}
               className="h-[220px]"
             >
@@ -502,12 +524,17 @@ export function StatsView({ entries, projects }: StatsViewProps) {
                     <stop offset="5%" stopColor="#60a5fa" stopOpacity={0.2} />
                     <stop offset="95%" stopColor="#60a5fa" stopOpacity={0} />
                   </linearGradient>
+                  <linearGradient id="homeGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#a78bfa" stopOpacity={0.2} />
+                    <stop offset="95%" stopColor="#a78bfa" stopOpacity={0} />
+                  </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(0 0% 20%)" />
                 <XAxis dataKey="date" tick={{ fontSize: 10, fill: "hsl(0 0% 45%)" }} interval={6} />
                 <YAxis tick={{ fontSize: 10, fill: "hsl(0 0% 45%)" }} />
                 <ChartTooltip content={<ChartTooltipContent />} />
                 <Area type="monotone" dataKey="office" stroke="#60a5fa" fill="url(#officeGradient)" strokeWidth={1.5} />
+                <Area type="monotone" dataKey="home" stroke="#a78bfa" fill="url(#homeGradient)" strokeWidth={1.5} />
                 <Area type="monotone" dataKey="work" stroke="#4ade80" fill="url(#workGradient)" strokeWidth={2} />
               </AreaChart>
             </ChartContainer>
@@ -527,7 +554,8 @@ export function StatsView({ entries, projects }: StatsViewProps) {
             <ChartContainer
               config={{
                 work: { label: "Hours Worked", color: "#4ade80" },
-                office: { label: "Hours in Office", color: "#60a5fa" },
+                office: { label: "In Office", color: "#60a5fa" },
+                home: { label: "At Home", color: "#a78bfa" },
               }}
               className="h-[220px]"
             >
@@ -537,6 +565,7 @@ export function StatsView({ entries, projects }: StatsViewProps) {
                 <YAxis tick={{ fontSize: 10, fill: "hsl(0 0% 45%)" }} />
                 <ChartTooltip content={<ChartTooltipContent />} />
                 <Bar dataKey="office" fill="#60a5fa" radius={[2, 2, 0, 0]} opacity={0.4} />
+                <Bar dataKey="home" fill="#a78bfa" radius={[2, 2, 0, 0]} opacity={0.4} />
                 <Bar dataKey="work" fill="#4ade80" radius={[2, 2, 0, 0]} />
               </BarChart>
             </ChartContainer>
@@ -710,13 +739,13 @@ export function StatsView({ entries, projects }: StatsViewProps) {
               </p>
             </div>
             <div className="rounded-lg bg-secondary/30 p-3">
-              <p className="text-xs text-muted-foreground">Work-to-Office Ratio</p>
+              <p className="text-xs text-muted-foreground">Work-to-Presence Ratio</p>
               <p className="mt-1 text-lg font-bold tabular-nums text-green-400">
-                {stats.allTime.officeMin > 0
-                  ? `${Math.round((stats.allTime.workMin / stats.allTime.officeMin) * 100)}%`
+                {(stats.allTime.officeMin + stats.allTime.homeMin) > 0
+                  ? `${Math.round((stats.allTime.workMin / (stats.allTime.officeMin + stats.allTime.homeMin)) * 100)}%`
                   : "--"}
               </p>
-              <p className="text-xs text-muted-foreground">Time spent actively working</p>
+              <p className="text-xs text-muted-foreground">Active work vs clocked time</p>
             </div>
             {stats.allTime.homeMin > 0 && (
               <div className="rounded-lg bg-secondary/30 p-3">
