@@ -1,12 +1,13 @@
 "use client"
 
-import { Clock, LogIn, LogOut, UtensilsCrossed, Coffee, Plus, Trash2, Building2, Briefcase } from "lucide-react"
+import { Clock, LogIn, LogOut, UtensilsCrossed, Coffee, Plus, Trash2, Building2, Briefcase, Timer } from "lucide-react"
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 import type { DayEntry, Break, DayProjectEntry, WorkSession } from "@/lib/types"
 import { parseISO, isToday } from "date-fns"
 
@@ -159,6 +160,16 @@ function calculateLiveProjectMinutes(entry: DayEntry | undefined): number {
   return totalMinutes
 }
 
+function roundTimeToNearest5(time: string): string {
+  if (!time) return time
+  const [h, m] = time.split(":").map(Number)
+  if (isNaN(h) || isNaN(m)) return time
+  const rounded = Math.round(m / 5) * 5
+  const newH = h + Math.floor(rounded / 60)
+  const newM = rounded % 60
+  return `${String(newH).padStart(2, "0")}:${String(newM).padStart(2, "0")}`
+}
+
 function minutesToString(minutes: number): string {
   const h = Math.floor(minutes / 60)
   const m = Math.floor(minutes % 60)
@@ -207,6 +218,44 @@ export function TimeEntry({ entry, selectedDate, onUpdate, dayProjects, onUpdate
         const hoursWorked = Math.round((totalMinutes / 60) * 100) / 100
         onUpdateProject(dayProject.id, { workSessions: updatedSessions, hoursWorked })
       }
+    }
+  }
+
+  const handleRoundTo5 = () => {
+    // Round clock in/out and lunch times
+    const roundedData: Partial<DayEntry> = {}
+    if (clockIn) roundedData.clockIn = roundTimeToNearest5(clockIn)
+    if (clockOut) roundedData.clockOut = roundTimeToNearest5(clockOut)
+    if (lunchStart) roundedData.lunchStart = roundTimeToNearest5(lunchStart)
+    if (lunchEnd) roundedData.lunchEnd = roundTimeToNearest5(lunchEnd)
+
+    // Round breaks
+    if (breaks.length > 0) {
+      roundedData.breaks = breaks.map((brk) => ({
+        ...brk,
+        start: brk.start ? roundTimeToNearest5(brk.start) : brk.start,
+        end: brk.end ? roundTimeToNearest5(brk.end) : brk.end,
+      }))
+    }
+
+    if (Object.keys(roundedData).length > 0) {
+      onUpdate(roundedData)
+    }
+
+    // Round project work sessions
+    for (const dayProject of dayProjects) {
+      const sessions = dayProject.workSessions ?? []
+      if (sessions.length === 0) continue
+
+      const roundedSessions = sessions.map((s) => ({
+        ...s,
+        start: s.start ? roundTimeToNearest5(s.start) : s.start,
+        end: s.end ? roundTimeToNearest5(s.end) : s.end,
+      }))
+
+      const totalMinutes = calculateSessionsMinutes(roundedSessions)
+      const hoursWorked = Math.round((totalMinutes / 60) * 100) / 100
+      onUpdateProject(dayProject.id, { workSessions: roundedSessions, hoursWorked })
     }
   }
 
@@ -332,8 +381,22 @@ export function TimeEntry({ entry, selectedDate, onUpdate, dayProjects, onUpdate
         <CardTitle className="flex items-center gap-2 text-base">
           <Clock className="h-4 w-4 text-accent" />
           Time Tracking
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleRoundTo5}
+                className="ml-auto h-7 gap-1.5 bg-transparent text-xs font-normal text-muted-foreground"
+              >
+                <Timer className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Round to 5</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Round all times to nearest 5 minutes</TooltipContent>
+          </Tooltip>
           {shouldShowLiveTime && statusText && (
-            <span className={`ml-auto flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${
+            <span className={`flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${
               isOnLunch || isOnBreak 
                 ? "bg-amber-500/20 text-amber-400" 
                 : hasActiveProjectSession
