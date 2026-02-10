@@ -72,9 +72,9 @@ export function ProjectsView({
       })
     }
 
-    // Sort by most recently updated
-    return result.sort(
-      (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+    // Sort alphabetically by name
+    return result.sort((a, b) =>
+      a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
     )
   }, [projects, search, filter])
 

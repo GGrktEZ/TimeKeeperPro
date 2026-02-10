@@ -21,13 +21,19 @@ const PROJECT_COLORS = [
   "bg-pink-500",
 ]
 
-function getNextColor(existingProjects: Project[]): string {
-  const usedColors = existingProjects.map((p) => p.color)
-  const availableColors = PROJECT_COLORS.filter((c) => !usedColors.includes(c))
-  if (availableColors.length > 0) {
-    return availableColors[0]
-  }
-  return PROJECT_COLORS[existingProjects.length % PROJECT_COLORS.length]
+// Assign a color based on a project's alphabetical position among all projects
+function getColorForAlphaIndex(index: number): string {
+  return PROJECT_COLORS[index % PROJECT_COLORS.length]
+}
+
+// Reassign colors to all projects based on alphabetical sort order
+function reassignColors(projects: Project[]): Project[] {
+  const sorted = [...projects].sort((a, b) =>
+    a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
+  )
+  const colorMap = new Map<string, string>()
+  sorted.forEach((p, i) => colorMap.set(p.id, getColorForAlphaIndex(i)))
+  return projects.map((p) => ({ ...p, color: colorMap.get(p.id) ?? p.color }))
 }
 
 export function useProjects() {
@@ -44,7 +50,7 @@ export function useProjects() {
           ...p,
           tasks: p.tasks ?? [],
         }))
-        setProjects(migrated)
+        setProjects(reassignColors(migrated))
       } catch {
         setProjects([])
       }
@@ -64,14 +70,14 @@ export function useProjects() {
         ...data,
         tasks: data.tasks ?? [],
         id: generateId(),
-        color: getNextColor(projects),
+        color: "", // will be reassigned
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       }
-      setProjects((prev) => [...prev, newProject])
+      setProjects((prev) => reassignColors([...prev, newProject]))
       return newProject
     },
-    [projects]
+    []
   )
 
   const updateProject = useCallback((id: string, data: Partial<Project>) => {
@@ -83,7 +89,7 @@ export function useProjects() {
   }, [])
 
   const deleteProject = useCallback((id: string) => {
-    setProjects((prev) => prev.filter((p) => p.id !== id))
+    setProjects((prev) => reassignColors(prev.filter((p) => p.id !== id)))
   }, [])
 
   const getProject = useCallback(
@@ -111,14 +117,14 @@ export function useProjects() {
             ...proj,
             tasks: ("tasks" in proj ? proj.tasks : undefined) ?? [],
             id: ("id" in proj && proj.id) ? proj.id : generateId(),
-            color: ("color" in proj && proj.color) ? proj.color : getNextColor(newProjects),
+            color: "", // will be reassigned
             createdAt: ("createdAt" in proj && proj.createdAt) ? proj.createdAt : new Date().toISOString(),
             updatedAt: new Date().toISOString(),
           })
         }
       }
       
-      return newProjects
+      return reassignColors(newProjects)
     })
   }, [])
 

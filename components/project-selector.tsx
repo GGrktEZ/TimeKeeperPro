@@ -30,12 +30,18 @@ export function ProjectSelector({
   const [taskPickerProject, setTaskPickerProject] = useState<Project | null>(null)
 
   const filteredProjects = useMemo(() => {
-    if (!search.trim()) return projects
-    const searchLower = search.toLowerCase()
-    return projects.filter(
-      (p) =>
-        p.name.toLowerCase().includes(searchLower) ||
-        p.description.toLowerCase().includes(searchLower)
+    let result = [...projects]
+    if (search.trim()) {
+      const searchLower = search.toLowerCase()
+      result = result.filter(
+        (p) =>
+          p.name.toLowerCase().includes(searchLower) ||
+          p.description.toLowerCase().includes(searchLower)
+      )
+    }
+    // Sort alphabetically
+    return result.sort((a, b) =>
+      a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
     )
   }, [projects, search])
 
