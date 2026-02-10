@@ -10,7 +10,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
-import { ScrollArea } from "@/components/ui/scroll-area"
+
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 import type { Project, DynamicsMetadata, ProjectTask } from "@/lib/types"
 import { format, parseISO } from "date-fns"
@@ -339,7 +339,7 @@ export function DynamicsSync({ projects, onImportProjects, onUpdateProject }: Dy
       </Tooltip>
 
       <Dialog open={open} onOpenChange={(o) => !o && handleClose()}>
-        <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col">
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-hidden flex flex-col">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Globe className="h-5 w-5 text-blue-400" />
@@ -490,7 +490,7 @@ export function DynamicsSync({ projects, onImportProjects, onUpdateProject }: Dy
 
           {/* PREVIEW */}
           {status === "preview" && (
-            <div className="flex flex-col min-h-0" style={{ maxHeight: "calc(80vh - 120px)" }}>
+            <div className="flex flex-col min-h-0 overflow-hidden flex-1">
               <div className="flex items-center justify-between shrink-0 pb-3">
                 <p className="text-sm text-muted-foreground">
                   Found <span className="font-medium text-foreground">{fetched.length}</span>{" "}
@@ -513,8 +513,8 @@ export function DynamicsSync({ projects, onImportProjects, onUpdateProject }: Dy
                 </div>
               </div>
 
-              <ScrollArea className="flex-1 min-h-0">
-                <div className="space-y-2 pr-2">
+              <div className="flex-1 min-h-0 overflow-y-auto">
+                <div className="space-y-2 pr-1">
                   {fetched.map((dp) => {
                     const isExisting = existingDynamicsIds.has(dp.dynamics.dynamicsId)
                     const isSelected = selected.has(dp.dynamics.dynamicsId)
@@ -604,7 +604,7 @@ export function DynamicsSync({ projects, onImportProjects, onUpdateProject }: Dy
                     )
                   })}
                 </div>
-              </ScrollArea>
+              </div>
 
               <div className="shrink-0 flex items-center justify-between border-t border-border pt-4 mt-4">
                 <div className="text-xs text-muted-foreground">
