@@ -221,6 +221,7 @@ export default function HomePage() {
             projects={projects}
             entries={entries}
             onAddProject={handleAddProject}
+            onImportProjects={importProjects}
             onUpdateProject={handleUpdateProject}
             onDeleteProject={handleDeleteProject}
           />

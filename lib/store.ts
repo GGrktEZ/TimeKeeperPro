@@ -84,19 +84,28 @@ export function useProjects() {
     [projects]
   )
 
-  const importProjects = useCallback((importedProjects: Project[]) => {
+  const importProjects = useCallback((importedProjects: (Project | Omit<Project, "id" | "color" | "createdAt" | "updatedAt">)[]) => {
     setProjects((prev) => {
       const existingNames = new Map(prev.map((p) => [p.name.toLowerCase(), p]))
+      const existingDynamicsIds = new Map(
+        prev.filter((p) => p.dynamics?.dynamicsId).map((p) => [p.dynamics!.dynamicsId, p])
+      )
       const newProjects = [...prev]
       
       for (const proj of importedProjects) {
-        const existing = existingNames.get(proj.name.toLowerCase())
+        // Check by Dynamics ID first, then by name
+        const dynamicsId = proj.dynamics?.dynamicsId
+        const existingByDynamics = dynamicsId ? existingDynamicsIds.get(dynamicsId) : undefined
+        const existing = existingByDynamics || existingNames.get(proj.name.toLowerCase())
+        
         if (!existing) {
           // Add new project with proper color
           newProjects.push({
             ...proj,
-            id: proj.id || generateId(),
-            color: proj.color || getNextColor(newProjects),
+            id: ("id" in proj && proj.id) ? proj.id : generateId(),
+            color: ("color" in proj && proj.color) ? proj.color : getNextColor(newProjects),
+            createdAt: ("createdAt" in proj && proj.createdAt) ? proj.createdAt : new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
           })
         }
       }

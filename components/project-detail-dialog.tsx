@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo } from "react"
-import { Calendar, Clock, TrendingUp, BarChart3, CalendarDays, Timer, Hash } from "lucide-react"
+import { Calendar, Clock, TrendingUp, BarChart3, CalendarDays, Timer, Hash, Globe } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -322,6 +322,50 @@ export function ProjectDetailDialog({ project, entries, open, onOpenChange }: Pr
                       </div>
                     </div>
                   ))}
+                </div>
+              </div>
+            )}
+
+            {/* Dynamics 365 Info */}
+            {project.dynamics && (
+              <div className="space-y-3">
+                <h4 className="text-sm font-medium text-foreground flex items-center gap-2">
+                  <Globe className="h-4 w-4 text-blue-400" />
+                  Dynamics 365
+                </h4>
+                <div className="grid gap-2 text-sm">
+                  <div className="flex justify-between rounded-lg bg-blue-500/5 border border-blue-500/20 px-3 py-2">
+                    <span className="text-muted-foreground">Dynamics ID</span>
+                    <span className="font-mono text-xs text-foreground">{project.dynamics.dynamicsId.slice(0, 8)}...</span>
+                  </div>
+                  {project.dynamics.teamSize > 0 && (
+                    <div className="flex justify-between rounded-lg bg-secondary/50 px-3 py-2">
+                      <span className="text-muted-foreground">Team Size</span>
+                      <span className="font-medium text-foreground">{project.dynamics.teamSize}</span>
+                    </div>
+                  )}
+                  {project.dynamics.duration != null && (
+                    <div className="flex justify-between rounded-lg bg-secondary/50 px-3 py-2">
+                      <span className="text-muted-foreground">Duration</span>
+                      <span className="font-medium text-foreground">{project.dynamics.duration} days</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between rounded-lg bg-secondary/50 px-3 py-2">
+                    <span className="text-muted-foreground">Hours/Day</span>
+                    <span className="font-medium text-foreground">{project.dynamics.hoursPerDay}h ({project.dynamics.hoursPerWeek}h/week)</span>
+                  </div>
+                  {project.dynamics.effort > 0 && (
+                    <div className="flex justify-between rounded-lg bg-secondary/50 px-3 py-2">
+                      <span className="text-muted-foreground">Effort</span>
+                      <span className="font-medium text-foreground">{project.dynamics.effort}h (completed: {project.dynamics.effortCompleted}h)</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between rounded-lg bg-secondary/50 px-3 py-2">
+                    <span className="text-muted-foreground">Last Synced</span>
+                    <span className="font-medium text-foreground">
+                      {format(parseISO(project.dynamics.lastSyncedAt), "MMM d, yyyy HH:mm")}
+                    </span>
+                  </div>
                 </div>
               </div>
             )}

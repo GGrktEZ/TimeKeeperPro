@@ -1,3 +1,27 @@
+export interface DynamicsMetadata {
+  dynamicsId: string
+  subject: string
+  statusCode: number
+  stateCode: number
+  scheduledStart: string | null
+  scheduledEnd: string | null
+  actualStart: string | null
+  actualEnd: string | null
+  effort: number
+  effortCompleted: number
+  effortRemaining: number
+  progress: number
+  teamSize: number
+  duration: number | null
+  hoursPerDay: number
+  hoursPerWeek: number
+  projectManagerId: string | null
+  ownerId: string | null
+  customerId: string | null
+  calendarId: string | null
+  lastSyncedAt: string
+}
+
 export interface Project {
   id: string
   name: string
@@ -5,6 +29,7 @@ export interface Project {
   endDate: string | null
   description: string
   color: string
+  dynamics?: DynamicsMetadata
   createdAt: string
   updatedAt: string
 }
