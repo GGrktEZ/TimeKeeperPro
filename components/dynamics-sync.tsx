@@ -1,32 +1,23 @@
 "use client"
 
-import { useState, useCallback, useEffect } from "react"
+import { useState, useCallback, useEffect, useRef } from "react"
 import {
-  RefreshCw, CloudDownload, Check, AlertTriangle, ExternalLink,
-  Globe, LogIn, LogOut, Settings2, User,
+  RefreshCw, CloudDownload, Check, AlertTriangle,
+  Globe, Bookmark, Radio,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 import type { Project, DynamicsMetadata } from "@/lib/types"
-import {
-  getSavedMsalConfig, saveMsalConfig, clearMsalConfig,
-  acquireDynamicsToken, logoutMsal, getActiveAccount,
-  type MsalConfig,
-} from "@/lib/msal"
 import { format, parseISO } from "date-fns"
-import type { AccountInfo } from "@azure/msal-browser"
 
 const DYNAMICS_API_URL =
   "https://theia.crm4.dynamics.com/api/data/v9.0/msdyn_projects?$filter=statuscode%20eq%201"
-const PROXY_URL = "/api/dynamics"
 
-// ---- Dynamics types & mapper (unchanged) ----
+// ---- Dynamics types & mapper ----
 
 interface DynamicsProject {
   msdyn_projectid: string
@@ -100,9 +91,41 @@ function mapDynamicsToProject(dp: DynamicsProject): {
   }
 }
 
+// ---- Generate bookmarklet code ----
+
+function generateBookmarkletCode(targetOrigin: string): string {
+  // The bookmarklet runs on the Dynamics domain (same-origin = no CORS).
+  // It fetches the API, then opens a popup to our app and sends the data via postMessage.
+  const code = `
+(async()=>{
+  try{
+    document.title='[Syncing...] '+document.title;
+    const r=await fetch('${DYNAMICS_API_URL}',{credentials:'include',headers:{Accept:'application/json','OData-MaxVersion':'4.0','OData-Version':'4.0'}});
+    if(!r.ok){alert('Dynamics API error: HTTP '+r.status+'\\n'+r.statusText);document.title=document.title.replace('[Syncing...] ','');return;}
+    const d=await r.json();
+    if(!d.value||!Array.isArray(d.value)){alert('Unexpected response shape. Keys: '+Object.keys(d).join(', '));document.title=document.title.replace('[Syncing...] ','');return;}
+    const w=window.open('${targetOrigin}?dynamics-receive=1','TimeKeeperSync','width=700,height=500');
+    if(!w){alert('Popup blocked! Allow popups for this site and try again.');document.title=document.title.replace('[Syncing...] ','');return;}
+    let sent=false;
+    const iv=setInterval(()=>{
+      try{w.postMessage({type:'dynamics-projects',projects:d.value,count:d.value.length},'${targetOrigin}');}catch(e){}
+    },300);
+    window.addEventListener('message',(ev)=>{
+      if(ev.origin==='${targetOrigin}'&&ev.data&&ev.data.type==='dynamics-ack'){
+        clearInterval(iv);sent=true;
+        document.title=document.title.replace('[Syncing...] ','');
+      }
+    });
+    setTimeout(()=>{clearInterval(iv);if(!sent){document.title=document.title.replace('[Syncing...] ','');}},30000);
+  }catch(e){alert('Bookmarklet error:\\n'+e.message);document.title=document.title.replace('[Syncing...] ','');}
+})()`.trim().replace(/\n\s*/g, "")
+
+  return `javascript:${encodeURIComponent(code)}`
+}
+
 // ---- Component ----
 
-type SyncStatus = "idle" | "config" | "authenticating" | "fetching" | "preview" | "importing" | "done" | "error"
+type SyncStatus = "idle" | "setup" | "waiting" | "preview" | "importing" | "done" | "error"
 
 interface DynamicsSyncProps {
   projects: Project[]
@@ -114,154 +137,69 @@ export function DynamicsSync({ projects, onImportProjects, onUpdateProject }: Dy
   const [open, setOpen] = useState(false)
   const [status, setStatus] = useState<SyncStatus>("idle")
   const [error, setError] = useState<string | null>(null)
-  const [errorCode, setErrorCode] = useState<number | null>(null)
   const [fetched, setFetched] = useState<ReturnType<typeof mapDynamicsToProject>[]>([])
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [importResult, setImportResult] = useState<{ created: number; updated: number }>({ created: 0, updated: 0 })
+  const [bookmarkletHref, setBookmarkletHref] = useState("")
+  const [bookmarkletSaved, setBookmarkletSaved] = useState(false)
+  const listenerActive = useRef(false)
 
-  // Auth state
-  const [msalConfig, setMsalConfig] = useState<MsalConfig | null>(null)
-  const [account, setAccount] = useState<AccountInfo | null>(null)
-  const [configDraft, setConfigDraft] = useState({ clientId: "", tenantId: "" })
-  const [showConfig, setShowConfig] = useState(false)
-
-  // Load saved config on mount
+  // Check if bookmarklet was saved before
   useEffect(() => {
-    const saved = getSavedMsalConfig()
-    if (saved) {
-      setMsalConfig(saved)
-      setConfigDraft({ clientId: saved.clientId, tenantId: saved.tenantId })
-      // Check if we have a cached account
-      getActiveAccount(saved).then(setAccount).catch(() => {})
+    setBookmarkletSaved(localStorage.getItem("dynamics-bookmarklet-saved") === "1")
+  }, [])
+
+  // Generate bookmarklet href on mount (needs window.location.origin)
+  useEffect(() => {
+    setBookmarkletHref(generateBookmarkletCode(window.location.origin))
+  }, [])
+
+  // Listen for postMessage from the bookmarklet
+  useEffect(() => {
+    function handleMessage(ev: MessageEvent) {
+      if (!listenerActive.current) return
+      // Accept from any origin since the bookmarklet opens our page as a popup
+      if (ev.data?.type === "dynamics-projects" && Array.isArray(ev.data.projects)) {
+        // Send ack back to the Dynamics tab
+        if (ev.source && typeof (ev.source as Window).postMessage === "function") {
+          try {
+            (ev.source as Window).postMessage({ type: "dynamics-ack" }, "*")
+          } catch { /* ignore */ }
+        }
+
+        try {
+          const mapped = (ev.data.projects as DynamicsProject[]).map(mapDynamicsToProject)
+          setFetched(mapped)
+          setSelected(new Set(mapped.map((m) => m.dynamics.dynamicsId)))
+          setStatus("preview")
+        } catch (err) {
+          setError(`Failed to parse Dynamics data:\n\n${err instanceof Error ? err.message : String(err)}`)
+          setStatus("error")
+        }
+      }
+    }
+
+    window.addEventListener("message", handleMessage)
+    return () => window.removeEventListener("message", handleMessage)
+  }, [])
+
+  // Also check URL params on mount -- if opened by bookmarklet as popup, start listening
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (params.get("dynamics-receive") === "1") {
+      listenerActive.current = true
+      setOpen(true)
+      setStatus("waiting")
+      // Clean up the URL param
+      const url = new URL(window.location.href)
+      url.searchParams.delete("dynamics-receive")
+      window.history.replaceState({}, "", url.toString())
     }
   }, [])
 
   const existingDynamicsIds = new Map(
     projects.filter((p) => p.dynamics?.dynamicsId).map((p) => [p.dynamics!.dynamicsId, p])
   )
-
-  const handleSaveConfig = () => {
-    if (!configDraft.clientId.trim() || !configDraft.tenantId.trim()) return
-    const cfg: MsalConfig = {
-      clientId: configDraft.clientId.trim(),
-      tenantId: configDraft.tenantId.trim(),
-    }
-    saveMsalConfig(cfg)
-    setMsalConfig(cfg)
-    setShowConfig(false)
-    setAccount(null) // Reset account since config changed
-  }
-
-  const handleSignIn = useCallback(async () => {
-    if (!msalConfig) {
-      setShowConfig(true)
-      return
-    }
-    setStatus("authenticating")
-    setError(null)
-    try {
-      const token = await acquireDynamicsToken(msalConfig)
-      const acc = await getActiveAccount(msalConfig)
-      setAccount(acc)
-      // Immediately fetch after sign-in
-      await fetchProjects(token)
-    } catch (err) {
-      const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err)
-      setError(`Microsoft sign-in failed:\n\n${msg}`)
-      setStatus("error")
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [msalConfig])
-
-  const handleSignOut = useCallback(async () => {
-    if (!msalConfig) return
-    try {
-      await logoutMsal(msalConfig)
-    } catch { /* ignore */ }
-    setAccount(null)
-  }, [msalConfig])
-
-  const handleDisconnect = () => {
-    clearMsalConfig()
-    setMsalConfig(null)
-    setAccount(null)
-    setConfigDraft({ clientId: "", tenantId: "" })
-  }
-
-  const fetchProjects = useCallback(async (token: string) => {
-    setStatus("fetching")
-    setError(null)
-    setErrorCode(null)
-
-    try {
-      // Use proxy to bypass CORS, passing the Bearer token
-      const res = await fetch(PROXY_URL, {
-        headers: {
-          "X-Dynamics-Token": token,
-        },
-      })
-
-      if (!res.ok) {
-        setErrorCode(res.status)
-        let body = ""
-        try { body = await res.text() } catch { /* */ }
-
-        let jsonMsg = ""
-        try {
-          const j = JSON.parse(body)
-          jsonMsg = j?.error?.message || j?.Message || j?.message || ""
-        } catch { /* */ }
-
-        setError(`HTTP ${res.status}\n\n${jsonMsg || body?.slice(0, 500) || res.statusText}`)
-        setStatus("error")
-        return
-      }
-
-      let rawBody = ""
-      let data: DynamicsApiResponse
-      try {
-        rawBody = await res.text()
-        data = JSON.parse(rawBody)
-      } catch (parseErr) {
-        setError(`Response is not valid JSON.\n\nFirst 500 chars:\n${rawBody.slice(0, 500)}\n\n${parseErr instanceof Error ? parseErr.message : String(parseErr)}`)
-        setStatus("error")
-        return
-      }
-
-      if (!data.value || !Array.isArray(data.value)) {
-        setError(`Response has no "value" array.\n\nKeys: ${Object.keys(data).join(", ")}\n\nFirst 500 chars:\n${rawBody.slice(0, 500)}`)
-        setStatus("error")
-        return
-      }
-
-      const mapped = data.value.map(mapDynamicsToProject)
-      setFetched(mapped)
-      setSelected(new Set(mapped.map((m) => m.dynamics.dynamicsId)))
-      setStatus("preview")
-    } catch (err) {
-      setError(`Fetch failed:\n\n${err instanceof Error ? `${err.name}: ${err.message}` : String(err)}`)
-      setStatus("error")
-    }
-  }, [])
-
-  const handleFetch = useCallback(async () => {
-    if (!msalConfig) {
-      setShowConfig(true)
-      return
-    }
-    setStatus("authenticating")
-    setError(null)
-    try {
-      const token = await acquireDynamicsToken(msalConfig)
-      const acc = await getActiveAccount(msalConfig)
-      setAccount(acc)
-      await fetchProjects(token)
-    } catch (err) {
-      const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err)
-      setError(`Token acquisition failed:\n\n${msg}`)
-      setStatus("error")
-    }
-  }, [msalConfig, fetchProjects])
 
   const handleImport = useCallback(() => {
     setStatus("importing")
@@ -293,14 +231,23 @@ export function DynamicsSync({ projects, onImportProjects, onUpdateProject }: Dy
 
   const handleClose = () => {
     setOpen(false)
-    setShowConfig(false)
+    listenerActive.current = false
     setTimeout(() => {
       setStatus("idle")
       setError(null)
-      setErrorCode(null)
       setFetched([])
       setSelected(new Set())
     }, 200)
+  }
+
+  const handleStartWaiting = () => {
+    listenerActive.current = true
+    setStatus("waiting")
+  }
+
+  const handleMarkBookmarkletSaved = () => {
+    setBookmarkletSaved(true)
+    localStorage.setItem("dynamics-bookmarklet-saved", "1")
   }
 
   const toggleSelect = (id: string) => {
@@ -326,10 +273,10 @@ export function DynamicsSync({ projects, onImportProjects, onUpdateProject }: Dy
 
   const handleOpen = () => {
     setOpen(true)
-    if (!msalConfig) {
-      setShowConfig(true)
+    if (bookmarkletSaved) {
+      handleStartWaiting()
     } else {
-      handleFetch()
+      setStatus("setup")
     }
   }
 
@@ -351,79 +298,95 @@ export function DynamicsSync({ projects, onImportProjects, onUpdateProject }: Dy
             <DialogTitle className="flex items-center gap-2">
               <Globe className="h-5 w-5 text-blue-400" />
               Dynamics 365 Sync
-              {account && (
-                <span className="ml-auto flex items-center gap-1.5 text-xs font-normal text-muted-foreground">
-                  <User className="h-3 w-3" />
-                  {account.username}
-                </span>
-              )}
             </DialogTitle>
           </DialogHeader>
 
-          {/* CONFIG / SETUP */}
-          {(showConfig || (status === "idle" && !msalConfig)) && (
-            <div className="space-y-4 py-2">
-              <p className="text-sm text-muted-foreground">
-                To connect to Dynamics 365, you need an Azure AD App Registration with
-                the <code className="rounded bg-secondary px-1 py-0.5 text-xs">Dynamics CRM user_impersonation</code> permission.
-              </p>
+          {/* SETUP -- drag bookmarklet */}
+          {status === "setup" && (
+            <div className="space-y-5 py-2">
               <div className="space-y-3">
-                <div className="space-y-1.5">
-                  <Label htmlFor="clientId" className="text-xs">Application (Client) ID</Label>
-                  <Input
-                    id="clientId"
-                    placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-                    value={configDraft.clientId}
-                    onChange={(e) => setConfigDraft((d) => ({ ...d, clientId: e.target.value }))}
-                    className="font-mono text-sm"
-                  />
+                <p className="text-sm text-muted-foreground">
+                  One-time setup: drag this button to your bookmarks bar.
+                </p>
+                <div className="flex items-center justify-center rounded-lg border-2 border-dashed border-accent/30 bg-accent/5 py-6">
+                  {/* eslint-disable-next-line jsx-a11y/anchor-is-valid */}
+                  <a
+                    href={bookmarkletHref}
+                    onClick={(e) => e.preventDefault()}
+                    draggable
+                    className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-medium text-white shadow-md transition-transform hover:scale-105 active:scale-95 cursor-grab"
+                  >
+                    <Bookmark className="h-4 w-4" />
+                    Sync to TimeKeeper
+                  </a>
                 </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="tenantId" className="text-xs">Directory (Tenant) ID</Label>
-                  <Input
-                    id="tenantId"
-                    placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-                    value={configDraft.tenantId}
-                    onChange={(e) => setConfigDraft((d) => ({ ...d, tenantId: e.target.value }))}
-                    className="font-mono text-sm"
-                  />
-                </div>
+                <p className="text-center text-xs text-muted-foreground">
+                  Drag the blue button above to your bookmarks bar
+                </p>
               </div>
-              <p className="text-xs text-muted-foreground">
-                These are saved in your browser only. Find them in Azure Portal under App Registrations.
-                Make sure <code className="rounded bg-secondary px-1 py-0.5 text-[11px]">Single-page application</code> redirect URI is set to <code className="rounded bg-secondary px-1 py-0.5 text-[11px]">{typeof window !== "undefined" ? window.location.origin : "your-app-url"}</code>.
-              </p>
+
+              <div className="space-y-2 rounded-lg bg-secondary/30 p-4">
+                <p className="text-sm font-medium text-foreground">How it works</p>
+                <ol className="space-y-1.5 text-xs text-muted-foreground list-decimal list-inside">
+                  <li>Drag the bookmarklet to your bookmarks bar (once)</li>
+                  <li>Open <a href="https://theia.crm4.dynamics.com" target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">Dynamics 365</a> and sign in</li>
+                  <li>Click the <span className="font-medium text-foreground">Sync to TimeKeeper</span> bookmark</li>
+                  <li>Projects appear here for import</li>
+                </ol>
+                <p className="mt-2 text-[11px] text-muted-foreground">
+                  The bookmarklet fetches data directly from Dynamics using your existing browser session -- no extra login needed.
+                </p>
+              </div>
+
               <DialogFooter className="gap-2 sm:gap-0">
-                {msalConfig && (
-                  <Button variant="ghost" size="sm" className="mr-auto text-xs text-destructive" onClick={handleDisconnect}>
-                    Disconnect
-                  </Button>
-                )}
                 <Button variant="ghost" onClick={handleClose}>Cancel</Button>
                 <Button
-                  onClick={handleSaveConfig}
-                  disabled={!configDraft.clientId.trim() || !configDraft.tenantId.trim()}
+                  onClick={() => {
+                    handleMarkBookmarkletSaved()
+                    handleStartWaiting()
+                  }}
                 >
-                  Save & Connect
+                  I saved it, continue
                 </Button>
               </DialogFooter>
             </div>
           )}
 
-          {/* AUTHENTICATING */}
-          {status === "authenticating" && (
-            <div className="flex flex-col items-center gap-3 py-12">
-              <LogIn className="h-8 w-8 animate-pulse text-blue-400" />
-              <p className="text-sm text-muted-foreground">Signing in with Microsoft...</p>
-              <p className="text-xs text-muted-foreground">A popup window should appear. Complete the sign-in there.</p>
-            </div>
-          )}
+          {/* WAITING for bookmarklet data */}
+          {status === "waiting" && (
+            <div className="space-y-5 py-4">
+              <div className="flex flex-col items-center gap-4 py-6">
+                <div className="relative">
+                  <Radio className="h-10 w-10 text-accent" />
+                  <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-75" />
+                    <span className="relative inline-flex h-3 w-3 rounded-full bg-accent" />
+                  </span>
+                </div>
+                <div className="text-center space-y-1">
+                  <p className="text-sm font-medium text-foreground">Waiting for data...</p>
+                  <p className="text-xs text-muted-foreground">
+                    Go to your Dynamics 365 tab and click the <span className="font-medium text-foreground">Sync to TimeKeeper</span> bookmarklet
+                  </p>
+                </div>
+              </div>
 
-          {/* FETCHING */}
-          {status === "fetching" && (
-            <div className="flex flex-col items-center gap-3 py-12">
-              <RefreshCw className="h-8 w-8 animate-spin text-accent" />
-              <p className="text-sm text-muted-foreground">Fetching projects from Dynamics...</p>
+              <div className="rounded-lg bg-secondary/30 p-3">
+                <p className="text-xs text-muted-foreground">
+                  Not working? Make sure you are signed into Dynamics at{" "}
+                  <a href="https://theia.crm4.dynamics.com" target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">
+                    theia.crm4.dynamics.com
+                  </a>{" "}
+                  and allow popups if prompted.
+                </p>
+              </div>
+
+              <DialogFooter className="gap-2 sm:gap-0">
+                <Button variant="ghost" size="sm" className="mr-auto text-xs" onClick={() => setStatus("setup")}>
+                  Setup bookmarklet
+                </Button>
+                <Button variant="ghost" onClick={handleClose}>Cancel</Button>
+              </DialogFooter>
             </div>
           )}
 
@@ -433,45 +396,30 @@ export function DynamicsSync({ projects, onImportProjects, onUpdateProject }: Dy
               <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 space-y-3">
                 <div className="flex items-center gap-2">
                   <AlertTriangle className="h-4 w-4 shrink-0 text-destructive" />
-                  <span className="text-sm font-medium text-destructive">
-                    {errorCode ? `HTTP ${errorCode}` : "Error"}
-                  </span>
+                  <span className="text-sm font-medium text-destructive">Error</span>
                 </div>
                 <ScrollArea className="max-h-[300px]">
                   <pre className="whitespace-pre-wrap break-words text-xs text-foreground font-mono leading-relaxed">{error}</pre>
                 </ScrollArea>
               </div>
               <DialogFooter className="gap-2 sm:gap-0">
-                <Button variant="ghost" size="sm" className="mr-auto gap-1 text-xs" onClick={() => setShowConfig(true)}>
-                  <Settings2 className="h-3 w-3" /> Config
-                </Button>
                 <Button variant="ghost" onClick={handleClose}>Cancel</Button>
-                <Button onClick={handleFetch}>Retry</Button>
+                <Button onClick={handleStartWaiting}>Try Again</Button>
               </DialogFooter>
             </div>
           )}
 
           {/* PREVIEW */}
-          {status === "preview" && !showConfig && (
+          {status === "preview" && (
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <p className="text-sm text-muted-foreground">
                   Found <span className="font-medium text-foreground">{fetched.length}</span>{" "}
                   active project{fetched.length !== 1 ? "s" : ""}
                 </p>
-                <div className="flex items-center gap-2">
-                  <Button variant="ghost" size="sm" onClick={() => setShowConfig(true)} className="gap-1 text-xs text-muted-foreground">
-                    <Settings2 className="h-3 w-3" />
-                  </Button>
-                  {account && (
-                    <Button variant="ghost" size="sm" onClick={handleSignOut} className="gap-1 text-xs text-muted-foreground">
-                      <LogOut className="h-3 w-3" /> Sign Out
-                    </Button>
-                  )}
-                  <Button variant="ghost" size="sm" onClick={toggleAll} className="text-xs">
-                    {selected.size === fetched.length ? "Deselect All" : "Select All"}
-                  </Button>
-                </div>
+                <Button variant="ghost" size="sm" onClick={toggleAll} className="text-xs">
+                  {selected.size === fetched.length ? "Deselect All" : "Select All"}
+                </Button>
               </div>
 
               <ScrollArea className="h-[400px] pr-1">
