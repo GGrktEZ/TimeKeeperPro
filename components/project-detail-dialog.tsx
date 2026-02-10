@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo } from "react"
-import { Calendar, Clock, TrendingUp, BarChart3, CalendarDays, Timer, Hash, Globe } from "lucide-react"
+import { Calendar, Clock, TrendingUp, BarChart3, CalendarDays, Timer, Hash, Globe, ListTodo } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -187,6 +187,54 @@ export function ProjectDetailDialog({ project, entries, open, onOpenChange }: Pr
               <span className="text-muted-foreground/40">|</span>
               <span>{getDuration()}</span>
             </div>
+
+            {/* Tasks */}
+            {(project.tasks?.length ?? 0) > 0 && (
+              <div className="space-y-3">
+                <h4 className="text-sm font-medium text-foreground flex items-center gap-2">
+                  <ListTodo className="h-4 w-4" />
+                  Tasks ({project.tasks.length})
+                </h4>
+                <div className="space-y-1.5">
+                  {project.tasks.map((task) => {
+                    const startLabel = task.actualStart
+                      ? format(parseISO(task.actualStart), "MMM d, yyyy")
+                      : task.scheduledStart
+                        ? format(parseISO(task.scheduledStart), "MMM d, yyyy")
+                        : null
+                    const isActualStart = !!task.actualStart
+                    return (
+                      <div
+                        key={task.id}
+                        className="flex items-center justify-between rounded-lg border border-border bg-secondary/30 px-3 py-2"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium text-foreground truncate">{task.name}</p>
+                          {task.description && (
+                            <p className="text-xs text-muted-foreground truncate">{task.description}</p>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-3 shrink-0 text-xs text-muted-foreground ml-3">
+                          {startLabel && (
+                            <span className={isActualStart ? "" : "italic"}>
+                              {isActualStart ? "Started" : "Planned"} {startLabel}
+                            </span>
+                          )}
+                          {task.progress > 0 && (
+                            <div className="flex items-center gap-1.5">
+                              <div className="h-1.5 w-12 rounded-full bg-secondary overflow-hidden">
+                                <div className="h-full rounded-full bg-accent" style={{ width: `${Math.min(100, task.progress)}%` }} />
+                              </div>
+                              <span className="text-[11px]">{task.progress}%</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
 
             {/* Main Stats Grid */}
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">

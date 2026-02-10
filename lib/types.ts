@@ -1,3 +1,18 @@
+export interface ProjectTask {
+  id: string
+  name: string
+  description: string
+  dynamicsTaskId?: string
+  scheduledStart: string | null
+  scheduledEnd: string | null
+  actualStart: string | null
+  actualEnd: string | null
+  progress: number
+  effort: number
+  effortCompleted: number
+  effortRemaining: number
+}
+
 export interface DynamicsMetadata {
   dynamicsId: string
   subject: string
@@ -29,6 +44,7 @@ export interface Project {
   endDate: string | null
   description: string
   color: string
+  tasks: ProjectTask[]
   dynamics?: DynamicsMetadata
   createdAt: string
   updatedAt: string

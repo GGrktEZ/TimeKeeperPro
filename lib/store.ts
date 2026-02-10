@@ -38,7 +38,13 @@ export function useProjects() {
     const stored = localStorage.getItem(PROJECTS_KEY)
     if (stored) {
       try {
-        setProjects(JSON.parse(stored))
+        const parsed: Project[] = JSON.parse(stored)
+        // Migrate old projects that don't have tasks array
+        const migrated = parsed.map((p) => ({
+          ...p,
+          tasks: p.tasks ?? [],
+        }))
+        setProjects(migrated)
       } catch {
         setProjects([])
       }
@@ -56,6 +62,7 @@ export function useProjects() {
     (data: Omit<Project, "id" | "color" | "createdAt" | "updatedAt">) => {
       const newProject: Project = {
         ...data,
+        tasks: data.tasks ?? [],
         id: generateId(),
         color: getNextColor(projects),
         createdAt: new Date().toISOString(),
@@ -102,6 +109,7 @@ export function useProjects() {
           // Add new project with proper color
           newProjects.push({
             ...proj,
+            tasks: ("tasks" in proj ? proj.tasks : undefined) ?? [],
             id: ("id" in proj && proj.id) ? proj.id : generateId(),
             color: ("color" in proj && proj.color) ? proj.color : getNextColor(newProjects),
             createdAt: ("createdAt" in proj && proj.createdAt) ? proj.createdAt : new Date().toISOString(),
