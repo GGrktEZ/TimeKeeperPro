@@ -1,20 +1,21 @@
 "use client"
 
-import { useState, useCallback, useEffect, useRef } from "react"
+import { useState, useCallback, useMemo } from "react"
 import {
   RefreshCw, CloudDownload, Check, AlertTriangle,
-  Globe, Bookmark, Radio, Copy,
+  Globe, ClipboardPaste, ExternalLink,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog"
+import { Textarea } from "@/components/ui/textarea"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 import type { Project, DynamicsMetadata } from "@/lib/types"
 import { format, parseISO } from "date-fns"
 
-const DYNAMICS_API_URL =
+const DYNAMICS_URL =
   "https://theia.crm4.dynamics.com/api/data/v9.0/msdyn_projects?$filter=statuscode%20eq%201"
 
 // ---- Dynamics types & mapper ----
@@ -44,11 +45,6 @@ interface DynamicsProject {
   msdyn_calendarid: string | null
   createdon: string
   modifiedon: string
-}
-
-interface DynamicsApiResponse {
-  "@odata.context": string
-  value: DynamicsProject[]
 }
 
 function mapDynamicsToProject(dp: DynamicsProject): {
@@ -91,19 +87,9 @@ function mapDynamicsToProject(dp: DynamicsProject): {
   }
 }
 
-// ---- Generate bookmarklet code ----
-// The bookmarklet fetches Dynamics same-origin (no CORS), then POSTs the data
-// to the app's API route. The app component polls that route for results.
-
-function generateBookmarkletCode(appOrigin: string): string {
-  const receiveUrl = `${appOrigin}/api/dynamics/receive`
-  const code = `javascript:void(function(){var t=document.title;document.title='[Syncing...] '+t;fetch('${DYNAMICS_API_URL}',{credentials:'include',headers:{Accept:'application/json','OData-MaxVersion':'4.0','OData-Version':'4.0'}}).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status+' '+r.statusText);return r.json()}).then(function(d){if(!d.value||!Array.isArray(d.value))throw new Error('No value array. Keys: '+Object.keys(d).join(', '));return fetch('${receiveUrl}',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)})}).then(function(r){return r.json()}).then(function(j){document.title=t;if(j.ok)alert('Synced '+j.count+' projects! Switch back to TimeKeeper.');else alert('Send failed: '+(j.error||'Unknown error'))}).catch(function(e){document.title=t;alert('Sync failed:\\n'+e.message)})}())`
-  return code
-}
-
 // ---- Component ----
 
-type SyncStatus = "idle" | "setup" | "waiting" | "preview" | "importing" | "done" | "error"
+type SyncStatus = "idle" | "paste" | "preview" | "importing" | "done" | "error"
 
 interface DynamicsSyncProps {
   projects: Project[]
@@ -115,49 +101,72 @@ export function DynamicsSync({ projects, onImportProjects, onUpdateProject }: Dy
   const [open, setOpen] = useState(false)
   const [status, setStatus] = useState<SyncStatus>("idle")
   const [error, setError] = useState<string | null>(null)
+  const [rawJson, setRawJson] = useState("")
   const [fetched, setFetched] = useState<ReturnType<typeof mapDynamicsToProject>[]>([])
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [importResult, setImportResult] = useState<{ created: number; updated: number }>({ created: 0, updated: 0 })
-  const [bookmarkletHref, setBookmarkletHref] = useState("")
-  const [bookmarkletSaved, setBookmarkletSaved] = useState(false)
-  const listenerActive = useRef(false)
 
-  // Check if bookmarklet was saved before
-  useEffect(() => {
-    setBookmarkletSaved(localStorage.getItem("dynamics-bookmarklet-saved") === "1")
-  }, [])
-
-  // Generate bookmarklet href on mount (needs window.location.origin)
-  useEffect(() => {
-    setBookmarkletHref(generateBookmarkletCode(window.location.origin))
-  }, [])
-
-  // Poll the receive API endpoint for data from the bookmarklet
-  useEffect(() => {
-    if (!listenerActive.current) return
-    const interval = setInterval(async () => {
-      if (!listenerActive.current) return
-      try {
-        const res = await fetch("/api/dynamics/receive")
-        if (!res.ok) return
-        const json = await res.json()
-        if (!json.available) return
-        const data = json.data as DynamicsApiResponse
-        const mapped = data.value.map(mapDynamicsToProject)
-        setFetched(mapped)
-        setSelected(new Set(mapped.map((m) => m.dynamics.dynamicsId)))
-        setStatus("preview")
-      } catch (err) {
-        setError(`Failed to poll for data:\n\n${err instanceof Error ? err.message : String(err)}`)
-        setStatus("error")
-      }
-    }, 1000)
-    return () => clearInterval(interval)
-  })
-
-  const existingDynamicsIds = new Map(
-    projects.filter((p) => p.dynamics?.dynamicsId).map((p) => [p.dynamics!.dynamicsId, p])
+  const existingDynamicsIds = useMemo(
+    () => new Map(projects.filter((p) => p.dynamics?.dynamicsId).map((p) => [p.dynamics!.dynamicsId, p])),
+    [projects]
   )
+
+  const handleParse = useCallback(() => {
+    setError(null)
+    const trimmed = rawJson.trim()
+    if (!trimmed) {
+      setError("Paste the JSON response first.")
+      return
+    }
+
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(trimmed)
+    } catch (e) {
+      setError(`Invalid JSON: ${e instanceof Error ? e.message : String(e)}`)
+      return
+    }
+
+    // Accept either { value: [...] } or a raw array [...]
+    let projectArray: DynamicsProject[]
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      "value" in parsed &&
+      Array.isArray((parsed as { value: unknown }).value)
+    ) {
+      projectArray = (parsed as { value: DynamicsProject[] }).value
+    } else if (Array.isArray(parsed)) {
+      projectArray = parsed as DynamicsProject[]
+    } else {
+      const keys = parsed && typeof parsed === "object" ? Object.keys(parsed).join(", ") : typeof parsed
+      setError(`Expected a JSON object with a "value" array, or a plain array.\n\nGot: ${keys}`)
+      return
+    }
+
+    if (projectArray.length === 0) {
+      setError("The JSON contains 0 projects.")
+      return
+    }
+
+    // Validate first entry has expected fields
+    const first = projectArray[0]
+    if (!first.msdyn_projectid || !first.msdyn_subject) {
+      setError(
+        `The data doesn't look like Dynamics project data.\n\nFirst item keys: ${Object.keys(first).slice(0, 10).join(", ")}...`
+      )
+      return
+    }
+
+    try {
+      const mapped = projectArray.map(mapDynamicsToProject)
+      setFetched(mapped)
+      setSelected(new Set(mapped.map((m) => m.dynamics.dynamicsId)))
+      setStatus("preview")
+    } catch (e) {
+      setError(`Failed to map projects: ${e instanceof Error ? e.message : String(e)}`)
+    }
+  }, [rawJson])
 
   const handleImport = useCallback(() => {
     setStatus("importing")
@@ -189,23 +198,13 @@ export function DynamicsSync({ projects, onImportProjects, onUpdateProject }: Dy
 
   const handleClose = () => {
     setOpen(false)
-    listenerActive.current = false
     setTimeout(() => {
       setStatus("idle")
       setError(null)
+      setRawJson("")
       setFetched([])
       setSelected(new Set())
     }, 200)
-  }
-
-  const handleStartWaiting = () => {
-    listenerActive.current = true
-    setStatus("waiting")
-  }
-
-  const handleMarkBookmarkletSaved = () => {
-    setBookmarkletSaved(true)
-    localStorage.setItem("dynamics-bookmarklet-saved", "1")
   }
 
   const toggleSelect = (id: string) => {
@@ -229,20 +228,15 @@ export function DynamicsSync({ projects, onImportProjects, onUpdateProject }: Dy
     (f) => selected.has(f.dynamics.dynamicsId) && existingDynamicsIds.has(f.dynamics.dynamicsId)
   ).length
 
-  const handleOpen = () => {
-    setOpen(true)
-    if (bookmarkletSaved) {
-      handleStartWaiting()
-    } else {
-      setStatus("setup")
-    }
-  }
-
   return (
     <>
       <Tooltip>
         <TooltipTrigger asChild>
-          <Button variant="outline" className="gap-2 bg-transparent" onClick={handleOpen}>
+          <Button
+            variant="outline"
+            className="gap-2 bg-transparent"
+            onClick={() => { setOpen(true); setStatus("paste") }}
+          >
             <Globe className="h-4 w-4" />
             <span className="hidden sm:inline">Sync Dynamics</span>
           </Button>
@@ -259,124 +253,62 @@ export function DynamicsSync({ projects, onImportProjects, onUpdateProject }: Dy
             </DialogTitle>
           </DialogHeader>
 
-          {/* SETUP -- drag bookmarklet */}
-          {status === "setup" && (
-            <div className="space-y-5 py-2">
-              <div className="space-y-3">
-                <p className="text-sm text-muted-foreground">
-                  One-time setup: drag this button to your bookmarks bar.
-                </p>
-                <div className="flex flex-col items-center gap-3 rounded-lg border-2 border-dashed border-accent/30 bg-accent/5 py-6">
-                  {/* eslint-disable-next-line jsx-a11y/anchor-is-valid */}
-                  <a
-                    href={bookmarkletHref}
-                    onClick={(e) => e.preventDefault()}
-                    draggable
-                    className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-medium text-white shadow-md transition-transform hover:scale-105 active:scale-95 cursor-grab"
-                  >
-                    <Bookmark className="h-4 w-4" />
-                    Sync to TimeKeeper
-                  </a>
-                  <p className="text-xs text-muted-foreground">
-                    Drag above to bookmarks bar, or:
+          {/* PASTE step */}
+          {status === "paste" && (
+            <div className="space-y-4 py-2">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm text-muted-foreground">
+                    Paste the Dynamics API JSON response below.
                   </p>
                   <Button
-                    variant="outline"
+                    variant="ghost"
                     size="sm"
-                    className="gap-1.5 text-xs"
-                    onClick={() => {
-                      navigator.clipboard.writeText(bookmarkletHref)
-                    }}
+                    className="gap-1.5 text-xs text-accent"
+                    onClick={() => window.open(DYNAMICS_URL, "_blank")}
                   >
-                    <Copy className="h-3 w-3" />
-                    Copy bookmarklet code
+                    Open API URL <ExternalLink className="h-3 w-3" />
                   </Button>
                 </div>
-                <p className="text-center text-xs text-muted-foreground">
-                  If copying: create a new bookmark, paste the code as the URL
-                </p>
+                <Textarea
+                  placeholder='{"@odata.context":"...","value":[...]}'
+                  value={rawJson}
+                  onChange={(e) => { setRawJson(e.target.value); setError(null) }}
+                  className="h-[200px] font-mono text-xs"
+                />
+                {error && (
+                  <div className="flex items-start gap-2 rounded-lg border border-destructive/50 bg-destructive/10 p-3">
+                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+                    <pre className="whitespace-pre-wrap break-words text-xs text-foreground font-mono leading-relaxed">{error}</pre>
+                  </div>
+                )}
               </div>
 
-              <div className="space-y-2 rounded-lg bg-secondary/30 p-4">
-                <p className="text-sm font-medium text-foreground">How it works</p>
-                <ol className="space-y-1.5 text-xs text-muted-foreground list-decimal list-inside">
-                  <li>Drag the bookmarklet to your bookmarks bar (once)</li>
-                  <li>Open <a href="https://theia.crm4.dynamics.com" target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">Dynamics 365</a> and sign in</li>
-                  <li>Click the <span className="font-medium text-foreground">Sync to TimeKeeper</span> bookmark</li>
-                  <li>Projects appear here for import</li>
+              <div className="rounded-lg bg-secondary/30 p-3 space-y-1.5">
+                <p className="text-xs font-medium text-foreground">How to get the data</p>
+                <ol className="space-y-1 text-xs text-muted-foreground list-decimal list-inside">
+                  <li>
+                    Click{" "}
+                    <button
+                      onClick={() => window.open(DYNAMICS_URL, "_blank")}
+                      className="text-accent hover:underline"
+                    >
+                      Open API URL
+                    </button>
+                    {" "}above (sign in to Dynamics if prompted)
+                  </li>
+                  <li>Select all the JSON in the page (Ctrl+A / Cmd+A)</li>
+                  <li>Copy it (Ctrl+C / Cmd+C)</li>
+                  <li>Paste it here (Ctrl+V / Cmd+V)</li>
                 </ol>
-                <p className="mt-2 text-[11px] text-muted-foreground">
-                  The bookmarklet fetches data directly from Dynamics using your existing browser session -- no extra login needed.
-                </p>
               </div>
 
               <DialogFooter className="gap-2 sm:gap-0">
                 <Button variant="ghost" onClick={handleClose}>Cancel</Button>
-                <Button
-                  onClick={() => {
-                    handleMarkBookmarkletSaved()
-                    handleStartWaiting()
-                  }}
-                >
-                  I saved it, continue
+                <Button onClick={handleParse} disabled={!rawJson.trim()} className="gap-2">
+                  <ClipboardPaste className="h-4 w-4" />
+                  Parse JSON
                 </Button>
-              </DialogFooter>
-            </div>
-          )}
-
-          {/* WAITING for bookmarklet data */}
-          {status === "waiting" && (
-            <div className="space-y-5 py-4">
-              <div className="flex flex-col items-center gap-4 py-6">
-                <div className="relative">
-                  <Radio className="h-10 w-10 text-accent" />
-                  <span className="absolute -top-1 -right-1 flex h-3 w-3">
-                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-75" />
-                    <span className="relative inline-flex h-3 w-3 rounded-full bg-accent" />
-                  </span>
-                </div>
-                <div className="text-center space-y-1">
-                  <p className="text-sm font-medium text-foreground">Waiting for data...</p>
-                  <p className="text-xs text-muted-foreground">
-                    Go to your Dynamics 365 tab and click the <span className="font-medium text-foreground">Sync to TimeKeeper</span> bookmarklet
-                  </p>
-                </div>
-              </div>
-
-              <div className="rounded-lg bg-secondary/30 p-3">
-                <p className="text-xs text-muted-foreground">
-                  Not working? Make sure you are signed into Dynamics at{" "}
-                  <a href="https://theia.crm4.dynamics.com" target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">
-                    theia.crm4.dynamics.com
-                  </a>{" "}
-                  and allow popups if prompted.
-                </p>
-              </div>
-
-              <DialogFooter className="gap-2 sm:gap-0">
-                <Button variant="ghost" size="sm" className="mr-auto text-xs" onClick={() => setStatus("setup")}>
-                  Setup bookmarklet
-                </Button>
-                <Button variant="ghost" onClick={handleClose}>Cancel</Button>
-              </DialogFooter>
-            </div>
-          )}
-
-          {/* ERROR */}
-          {status === "error" && (
-            <div className="space-y-4 py-4">
-              <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 space-y-3">
-                <div className="flex items-center gap-2">
-                  <AlertTriangle className="h-4 w-4 shrink-0 text-destructive" />
-                  <span className="text-sm font-medium text-destructive">Error</span>
-                </div>
-                <ScrollArea className="max-h-[300px]">
-                  <pre className="whitespace-pre-wrap break-words text-xs text-foreground font-mono leading-relaxed">{error}</pre>
-                </ScrollArea>
-              </div>
-              <DialogFooter className="gap-2 sm:gap-0">
-                <Button variant="ghost" onClick={handleClose}>Cancel</Button>
-                <Button onClick={handleStartWaiting}>Try Again</Button>
               </DialogFooter>
             </div>
           )}
@@ -389,9 +321,14 @@ export function DynamicsSync({ projects, onImportProjects, onUpdateProject }: Dy
                   Found <span className="font-medium text-foreground">{fetched.length}</span>{" "}
                   active project{fetched.length !== 1 ? "s" : ""}
                 </p>
-                <Button variant="ghost" size="sm" onClick={toggleAll} className="text-xs">
-                  {selected.size === fetched.length ? "Deselect All" : "Select All"}
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button variant="ghost" size="sm" onClick={() => setStatus("paste")} className="text-xs">
+                    Back
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={toggleAll} className="text-xs">
+                    {selected.size === fetched.length ? "Deselect All" : "Select All"}
+                  </Button>
+                </div>
               </div>
 
               <ScrollArea className="h-[400px] pr-1">
@@ -463,17 +400,17 @@ export function DynamicsSync({ projects, onImportProjects, onUpdateProject }: Dy
           {/* DONE */}
           {status === "done" && (
             <div className="space-y-4 py-4">
-              <div className="flex flex-col items-center gap-3 py-4">
+              <div className="flex flex-col items-center gap-3 py-6">
                 <div className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-500/15">
                   <Check className="h-6 w-6 text-emerald-400" />
                 </div>
-                <div className="text-center">
-                  <p className="font-medium text-foreground">Sync Complete</p>
-                  <p className="mt-1 text-sm text-muted-foreground">
+                <div className="text-center space-y-1">
+                  <p className="text-sm font-medium text-foreground">Import complete</p>
+                  <p className="text-xs text-muted-foreground">
                     {importResult.created > 0 && (
-                      <span className="text-emerald-400">{importResult.created} imported</span>
+                      <span className="text-emerald-400">{importResult.created} created</span>
                     )}
-                    {importResult.created > 0 && importResult.updated > 0 && " and "}
+                    {importResult.created > 0 && importResult.updated > 0 && ", "}
                     {importResult.updated > 0 && (
                       <span className="text-blue-400">{importResult.updated} updated</span>
                     )}
