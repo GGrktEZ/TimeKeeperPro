@@ -456,7 +456,7 @@ export function DayProjects({
                       >
                         <GripVertical className="h-4 w-4" />
                       </div>
-                      <div className={`h-3 w-3 rounded-full ${project.color}`} />
+                      <div className="h-3 w-3 rounded-full" style={{ backgroundColor: project.color }} />
                       <h4 className="font-medium text-foreground">{project.name}</h4>
                       <LiveProjectTimer sessions={sessions} />
                       {isActive && (

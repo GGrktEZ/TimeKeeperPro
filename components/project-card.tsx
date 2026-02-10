@@ -115,7 +115,7 @@ export function ProjectCard({ project, entries, onUpdate, onDelete }: ProjectCar
         <CardHeader className="pb-2">
           <div className="flex items-start justify-between gap-2">
             <div className="flex items-center gap-3 min-w-0">
-              <div className={`h-4 w-4 rounded-full shrink-0 ${project.color}`} />
+              <div className="h-4 w-4 rounded-full shrink-0" style={{ backgroundColor: project.color }} />
               <h3 className="font-semibold text-foreground truncate">{project.name}</h3>
               {project.dynamics && (
                 <Globe className="h-3.5 w-3.5 shrink-0 text-blue-400" aria-label="Synced from Dynamics" />
