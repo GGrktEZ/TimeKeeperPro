@@ -121,8 +121,12 @@ export function DynamicsSync({ projects, onImportProjects, onUpdateProject }: Dy
     setErrorCode(null)
 
     try {
+      const controller = new AbortController()
+      const timeout = setTimeout(() => controller.abort(), 15000)
+
       const res = await fetch(DYNAMICS_API_URL, {
         credentials: "include",
+        signal: controller.signal,
         headers: {
           Accept: "application/json",
           "OData-MaxVersion": "4.0",
@@ -130,25 +134,57 @@ export function DynamicsSync({ projects, onImportProjects, onUpdateProject }: Dy
         },
       })
 
+      clearTimeout(timeout)
+
       if (!res.ok) {
         setErrorCode(res.status)
-        const errText = await res.text().catch(() => "")
-        if (res.status === 401 || res.status === 403) {
-          setError(
-            `Authentication failed (${res.status}). Make sure you are logged into Dynamics 365 in this browser.`
-          )
+        let errBody = ""
+        try { errBody = await res.text() } catch { /* ignore */ }
+
+        // Try to parse Dynamics error JSON
+        let parsedErr = ""
+        try {
+          const errJson = JSON.parse(errBody)
+          parsedErr = errJson?.error?.message || errJson?.Message || ""
+        } catch { /* not JSON */ }
+
+        const detail = parsedErr || errBody?.slice(0, 300) || res.statusText
+
+        if (res.status === 401) {
+          setError(`401 Unauthorized -- Your browser session is not authenticated with Dynamics 365. Open Dynamics in this browser and sign in, then try again.\n\nServer: ${detail}`)
+        } else if (res.status === 403) {
+          setError(`403 Forbidden -- You are signed in but do not have permission to access Dynamics projects.\n\nServer: ${detail}`)
+        } else if (res.status === 404) {
+          setError(`404 Not Found -- The Dynamics API endpoint could not be found. The org URL may be wrong.\n\nURL: ${DYNAMICS_API_URL}\nServer: ${detail}`)
+        } else if (res.status === 429) {
+          setError(`429 Too Many Requests -- Dynamics is rate-limiting you. Wait a moment and try again.\n\nServer: ${detail}`)
+        } else if (res.status >= 500) {
+          setError(`${res.status} Server Error -- Dynamics 365 returned a server-side error.\n\nServer: ${detail}`)
         } else {
-          setError(`Dynamics API returned ${res.status}: ${errText || res.statusText}`)
+          setError(`HTTP ${res.status} -- ${detail}`)
         }
         setStatus("error")
         return
       }
 
-      const data: DynamicsApiResponse = await res.json()
+      let data: DynamicsApiResponse
+      try {
+        data = await res.json()
+      } catch (parseErr) {
+        setError(`Response was 200 OK but the body is not valid JSON. This might mean a login redirect page was returned instead of API data.\n\nParse error: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}`)
+        setStatus("error")
+        return
+      }
+
+      if (!data.value || !Array.isArray(data.value)) {
+        setError(`Response JSON does not have a "value" array. The API returned an unexpected shape.\n\nKeys found: ${Object.keys(data).join(", ")}`)
+        setStatus("error")
+        return
+      }
+
       const mapped = data.value.map(mapDynamicsToProject)
       setFetched(mapped)
 
-      // Auto-select all new projects + projects that have changed
       const autoSelected = new Set<string>()
       for (const m of mapped) {
         autoSelected.add(m.dynamics.dynamicsId)
@@ -156,11 +192,13 @@ export function DynamicsSync({ projects, onImportProjects, onUpdateProject }: Dy
       setSelected(autoSelected)
       setStatus("preview")
     } catch (err) {
-      setError(
-        err instanceof TypeError
-          ? "Network error. This usually means CORS is blocking the request. Make sure you are on the same Dynamics domain or have proper access."
-          : `Unexpected error: ${err instanceof Error ? err.message : String(err)}`
-      )
+      if (err instanceof DOMException && err.name === "AbortError") {
+        setError("Request timed out after 15 seconds. Dynamics may be unreachable from this network.\n\nCheck:\n- Are you on a VPN or corporate network that can reach theia.crm4.dynamics.com?\n- Is Dynamics 365 currently online?")
+      } else if (err instanceof TypeError) {
+        setError(`Network error (fetch failed) -- The browser could not connect to Dynamics at all.\n\nThis usually means:\n1. CORS: This app's domain is not allowed to call the Dynamics API. You may need to open this app from the same domain or use a proxy.\n2. DNS: theia.crm4.dynamics.com could not be resolved.\n3. Blocked: A browser extension, firewall, or CSP is blocking the request.\n\nTechnical: ${err.message}`)
+      } else {
+        setError(`Unexpected error: ${err instanceof Error ? `${err.name}: ${err.message}` : String(err)}`)
+      }
       setStatus("error")
     }
   }, [])
@@ -283,22 +321,28 @@ export function DynamicsSync({ projects, onImportProjects, onUpdateProject }: Dy
             <div className="space-y-4 py-4">
               <div className="flex items-start gap-3 rounded-lg border border-destructive/50 bg-destructive/10 p-4">
                 <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
-                <div className="space-y-1">
-                  {errorCode && (
-                    <p className="text-sm font-medium text-destructive">Error {errorCode}</p>
+                <div className="space-y-2 min-w-0 flex-1">
+                  {errorCode ? (
+                    <p className="text-sm font-medium text-destructive">HTTP {errorCode}</p>
+                  ) : (
+                    <p className="text-sm font-medium text-destructive">Connection Failed</p>
                   )}
-                  <p className="text-sm text-foreground">{error}</p>
+                  <pre className="whitespace-pre-wrap break-words text-sm text-foreground font-mono leading-relaxed">{error}</pre>
                   {(errorCode === 401 || errorCode === 403) && (
                     <a
                       href="https://theia.crm4.dynamics.com"
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="mt-2 inline-flex items-center gap-1 text-xs text-accent hover:underline"
+                      className="inline-flex items-center gap-1 text-xs text-accent hover:underline"
                     >
                       Open Dynamics 365 to sign in <ExternalLink className="h-3 w-3" />
                     </a>
                   )}
                 </div>
+              </div>
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span>Target:</span>
+                <code className="rounded bg-secondary px-1.5 py-0.5 font-mono text-[11px] break-all">{DYNAMICS_API_URL}</code>
               </div>
               <DialogFooter className="gap-2 sm:gap-0">
                 <Button variant="ghost" onClick={handleClose}>
