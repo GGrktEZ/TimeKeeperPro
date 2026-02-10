@@ -3,7 +3,7 @@
 import React from "react"
 
 import { useState } from "react"
-import { Calendar, Edit2, Trash2, MoreVertical } from "lucide-react"
+import { Calendar, Edit2, Trash2, MoreVertical, Globe } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import {
@@ -117,6 +117,9 @@ export function ProjectCard({ project, entries, onUpdate, onDelete }: ProjectCar
             <div className="flex items-center gap-3 min-w-0">
               <div className={`h-4 w-4 rounded-full shrink-0 ${project.color}`} />
               <h3 className="font-semibold text-foreground truncate">{project.name}</h3>
+              {project.dynamics && (
+                <Globe className="h-3.5 w-3.5 shrink-0 text-blue-400" aria-label="Synced from Dynamics" />
+              )}
             </div>
             <div className="flex items-center gap-2 shrink-0">
               <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${status.className}`}>
