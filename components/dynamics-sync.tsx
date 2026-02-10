@@ -3,7 +3,7 @@
 import { useState, useCallback, useEffect, useRef } from "react"
 import {
   RefreshCw, CloudDownload, Check, AlertTriangle,
-  Globe, Bookmark, Radio,
+  Globe, Bookmark, Radio, Copy,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -92,35 +92,13 @@ function mapDynamicsToProject(dp: DynamicsProject): {
 }
 
 // ---- Generate bookmarklet code ----
+// The bookmarklet fetches Dynamics same-origin (no CORS), then POSTs the data
+// to the app's API route. The app component polls that route for results.
 
-function generateBookmarkletCode(targetOrigin: string): string {
-  // The bookmarklet runs on the Dynamics domain (same-origin = no CORS).
-  // It fetches the API, then opens a popup to our app and sends the data via postMessage.
-  const code = `
-(async()=>{
-  try{
-    document.title='[Syncing...] '+document.title;
-    const r=await fetch('${DYNAMICS_API_URL}',{credentials:'include',headers:{Accept:'application/json','OData-MaxVersion':'4.0','OData-Version':'4.0'}});
-    if(!r.ok){alert('Dynamics API error: HTTP '+r.status+'\\n'+r.statusText);document.title=document.title.replace('[Syncing...] ','');return;}
-    const d=await r.json();
-    if(!d.value||!Array.isArray(d.value)){alert('Unexpected response shape. Keys: '+Object.keys(d).join(', '));document.title=document.title.replace('[Syncing...] ','');return;}
-    const w=window.open('${targetOrigin}?dynamics-receive=1','TimeKeeperSync','width=700,height=500');
-    if(!w){alert('Popup blocked! Allow popups for this site and try again.');document.title=document.title.replace('[Syncing...] ','');return;}
-    let sent=false;
-    const iv=setInterval(()=>{
-      try{w.postMessage({type:'dynamics-projects',projects:d.value,count:d.value.length},'${targetOrigin}');}catch(e){}
-    },300);
-    window.addEventListener('message',(ev)=>{
-      if(ev.origin==='${targetOrigin}'&&ev.data&&ev.data.type==='dynamics-ack'){
-        clearInterval(iv);sent=true;
-        document.title=document.title.replace('[Syncing...] ','');
-      }
-    });
-    setTimeout(()=>{clearInterval(iv);if(!sent){document.title=document.title.replace('[Syncing...] ','');}},30000);
-  }catch(e){alert('Bookmarklet error:\\n'+e.message);document.title=document.title.replace('[Syncing...] ','');}
-})()`.trim().replace(/\n\s*/g, "")
-
-  return `javascript:${encodeURIComponent(code)}`
+function generateBookmarkletCode(appOrigin: string): string {
+  const receiveUrl = `${appOrigin}/api/dynamics/receive`
+  const code = `javascript:void(function(){var t=document.title;document.title='[Syncing...] '+t;fetch('${DYNAMICS_API_URL}',{credentials:'include',headers:{Accept:'application/json','OData-MaxVersion':'4.0','OData-Version':'4.0'}}).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status+' '+r.statusText);return r.json()}).then(function(d){if(!d.value||!Array.isArray(d.value))throw new Error('No value array. Keys: '+Object.keys(d).join(', '));return fetch('${receiveUrl}',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)})}).then(function(r){return r.json()}).then(function(j){document.title=t;if(j.ok)alert('Synced '+j.count+' projects! Switch back to TimeKeeper.');else alert('Send failed: '+(j.error||'Unknown error'))}).catch(function(e){document.title=t;alert('Sync failed:\\n'+e.message)})}())`
+  return code
 }
 
 // ---- Component ----
@@ -154,48 +132,28 @@ export function DynamicsSync({ projects, onImportProjects, onUpdateProject }: Dy
     setBookmarkletHref(generateBookmarkletCode(window.location.origin))
   }, [])
 
-  // Listen for postMessage from the bookmarklet
+  // Poll the receive API endpoint for data from the bookmarklet
   useEffect(() => {
-    function handleMessage(ev: MessageEvent) {
+    if (!listenerActive.current) return
+    const interval = setInterval(async () => {
       if (!listenerActive.current) return
-      // Accept from any origin since the bookmarklet opens our page as a popup
-      if (ev.data?.type === "dynamics-projects" && Array.isArray(ev.data.projects)) {
-        // Send ack back to the Dynamics tab
-        if (ev.source && typeof (ev.source as Window).postMessage === "function") {
-          try {
-            (ev.source as Window).postMessage({ type: "dynamics-ack" }, "*")
-          } catch { /* ignore */ }
-        }
-
-        try {
-          const mapped = (ev.data.projects as DynamicsProject[]).map(mapDynamicsToProject)
-          setFetched(mapped)
-          setSelected(new Set(mapped.map((m) => m.dynamics.dynamicsId)))
-          setStatus("preview")
-        } catch (err) {
-          setError(`Failed to parse Dynamics data:\n\n${err instanceof Error ? err.message : String(err)}`)
-          setStatus("error")
-        }
+      try {
+        const res = await fetch("/api/dynamics/receive")
+        if (!res.ok) return
+        const json = await res.json()
+        if (!json.available) return
+        const data = json.data as DynamicsApiResponse
+        const mapped = data.value.map(mapDynamicsToProject)
+        setFetched(mapped)
+        setSelected(new Set(mapped.map((m) => m.dynamics.dynamicsId)))
+        setStatus("preview")
+      } catch (err) {
+        setError(`Failed to poll for data:\n\n${err instanceof Error ? err.message : String(err)}`)
+        setStatus("error")
       }
-    }
-
-    window.addEventListener("message", handleMessage)
-    return () => window.removeEventListener("message", handleMessage)
-  }, [])
-
-  // Also check URL params on mount -- if opened by bookmarklet as popup, start listening
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    if (params.get("dynamics-receive") === "1") {
-      listenerActive.current = true
-      setOpen(true)
-      setStatus("waiting")
-      // Clean up the URL param
-      const url = new URL(window.location.href)
-      url.searchParams.delete("dynamics-receive")
-      window.history.replaceState({}, "", url.toString())
-    }
-  }, [])
+    }, 1000)
+    return () => clearInterval(interval)
+  })
 
   const existingDynamicsIds = new Map(
     projects.filter((p) => p.dynamics?.dynamicsId).map((p) => [p.dynamics!.dynamicsId, p])
@@ -308,7 +266,7 @@ export function DynamicsSync({ projects, onImportProjects, onUpdateProject }: Dy
                 <p className="text-sm text-muted-foreground">
                   One-time setup: drag this button to your bookmarks bar.
                 </p>
-                <div className="flex items-center justify-center rounded-lg border-2 border-dashed border-accent/30 bg-accent/5 py-6">
+                <div className="flex flex-col items-center gap-3 rounded-lg border-2 border-dashed border-accent/30 bg-accent/5 py-6">
                   {/* eslint-disable-next-line jsx-a11y/anchor-is-valid */}
                   <a
                     href={bookmarkletHref}
@@ -319,9 +277,23 @@ export function DynamicsSync({ projects, onImportProjects, onUpdateProject }: Dy
                     <Bookmark className="h-4 w-4" />
                     Sync to TimeKeeper
                   </a>
+                  <p className="text-xs text-muted-foreground">
+                    Drag above to bookmarks bar, or:
+                  </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5 text-xs"
+                    onClick={() => {
+                      navigator.clipboard.writeText(bookmarkletHref)
+                    }}
+                  >
+                    <Copy className="h-3 w-3" />
+                    Copy bookmarklet code
+                  </Button>
                 </div>
                 <p className="text-center text-xs text-muted-foreground">
-                  Drag the blue button above to your bookmarks bar
+                  If copying: create a new bookmark, paste the code as the URL
                 </p>
               </div>
 
