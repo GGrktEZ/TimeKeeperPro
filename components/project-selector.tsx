@@ -98,7 +98,7 @@ export function ProjectSelector({
             </Button>
 
             <div className="flex items-center gap-2 rounded-lg bg-secondary/50 px-3 py-2 shrink-0">
-              <div className={`h-3 w-3 rounded-full shrink-0 ${taskPickerProject.color}`} />
+              <div className="h-3 w-3 rounded-full shrink-0" style={{ backgroundColor: taskPickerProject.color }} />
               <span className="text-sm font-medium text-foreground truncate">{taskPickerProject.name}</span>
             </div>
 
@@ -166,7 +166,7 @@ export function ProjectSelector({
                         disabled={isSelected}
                         className="flex w-full items-center gap-3 rounded-lg border border-border bg-secondary/50 p-3 text-left transition-colors hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-50"
                       >
-                        <div className={`h-3 w-3 rounded-full shrink-0 ${project.color}`} />
+                        <div className="h-3 w-3 rounded-full shrink-0" style={{ backgroundColor: project.color }} />
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-medium text-foreground truncate">
                             {project.name}

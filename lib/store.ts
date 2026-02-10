@@ -10,20 +10,13 @@ function generateId(): string {
   return Math.random().toString(36).substring(2, 15) + Date.now().toString(36)
 }
 
-const PROJECT_COLORS = [
-  "bg-emerald-500",
-  "bg-blue-500",
-  "bg-amber-500",
-  "bg-rose-500",
-  "bg-violet-500",
-  "bg-cyan-500",
-  "bg-orange-500",
-  "bg-pink-500",
-]
-
-// Assign a color based on a project's alphabetical position among all projects
-function getColorForAlphaIndex(index: number): string {
-  return PROJECT_COLORS[index % PROJECT_COLORS.length]
+// Generate a color from a smooth HSL hue gradient based on alphabetical position.
+// Projects close alphabetically get similar hues.
+// Hue range: 0-330 (skip deep magenta/red overlap at 330-360)
+function getColorForAlphaPosition(index: number, total: number): string {
+  if (total <= 1) return "hsl(160, 65%, 50%)"
+  const hue = Math.round((index / (total - 1)) * 330)
+  return `hsl(${hue}, 65%, 50%)`
 }
 
 // Reassign colors to all projects based on alphabetical sort order
@@ -32,7 +25,7 @@ function reassignColors(projects: Project[]): Project[] {
     a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
   )
   const colorMap = new Map<string, string>()
-  sorted.forEach((p, i) => colorMap.set(p.id, getColorForAlphaIndex(i)))
+  sorted.forEach((p, i) => colorMap.set(p.id, getColorForAlphaPosition(i, sorted.length)))
   return projects.map((p) => ({ ...p, color: colorMap.get(p.id) ?? p.color }))
 }
 
@@ -81,11 +74,13 @@ export function useProjects() {
   )
 
   const updateProject = useCallback((id: string, data: Partial<Project>) => {
-    setProjects((prev) =>
-      prev.map((p) =>
+    setProjects((prev) => {
+      const updated = prev.map((p) =>
         p.id === id ? { ...p, ...data, updatedAt: new Date().toISOString() } : p
       )
-    )
+      // Reassign colors if name changed (alphabetical position may shift)
+      return data.name !== undefined ? reassignColors(updated) : updated
+    })
   }, [])
 
   const deleteProject = useCallback((id: string) => {

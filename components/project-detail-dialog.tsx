@@ -158,7 +158,7 @@ export function ProjectDetailDialog({ project, entries, open, onOpenChange }: Pr
       <DialogContent className="max-w-2xl max-h-[85vh]">
         <DialogHeader>
           <div className="flex items-center gap-3">
-            <div className={`h-5 w-5 rounded-full shrink-0 ${project.color}`} />
+            <div className="h-5 w-5 rounded-full shrink-0" style={{ backgroundColor: project.color }} />
             <DialogTitle className="text-xl">{project.name}</DialogTitle>
             <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${status.className}`}>
               {status.label}
