@@ -15,8 +15,9 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip
 import type { Project, DynamicsMetadata } from "@/lib/types"
 import { format, parseISO } from "date-fns"
 
-const DYNAMICS_API_URL =
+const DYNAMICS_DIRECT_URL =
   "https://theia.crm4.dynamics.com/api/data/v9.0/msdyn_projects?$filter=statuscode%20eq%201"
+const DYNAMICS_PROXY_URL = "/api/dynamics"
 
 interface DynamicsProject {
   msdyn_projectid: string
@@ -115,93 +116,121 @@ export function DynamicsSync({ projects, onImportProjects, onUpdateProject }: Dy
     projects.filter((p) => p.dynamics?.dynamicsId).map((p) => [p.dynamics!.dynamicsId, p])
   )
 
+  const attemptFetch = useCallback(async (url: string, opts?: RequestInit): Promise<Response> => {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 15000)
+    try {
+      const res = await fetch(url, { ...opts, signal: controller.signal })
+      clearTimeout(timeout)
+      return res
+    } catch (err) {
+      clearTimeout(timeout)
+      throw err
+    }
+  }, [])
+
   const handleFetch = useCallback(async () => {
     setStatus("fetching")
     setError(null)
     setErrorCode(null)
 
-    try {
-      const controller = new AbortController()
-      const timeout = setTimeout(() => controller.abort(), 15000)
+    let res: Response | null = null
+    let usedUrl = ""
+    const errors: string[] = []
 
-      const res = await fetch(DYNAMICS_API_URL, {
+    // Attempt 1: Direct to Dynamics (works if same-origin / CORS allowed)
+    try {
+      usedUrl = DYNAMICS_DIRECT_URL
+      res = await attemptFetch(DYNAMICS_DIRECT_URL, {
         credentials: "include",
-        signal: controller.signal,
         headers: {
           Accept: "application/json",
           "OData-MaxVersion": "4.0",
           "OData-Version": "4.0",
         },
       })
-
-      clearTimeout(timeout)
-
-      if (!res.ok) {
-        setErrorCode(res.status)
-        let errBody = ""
-        try { errBody = await res.text() } catch { /* ignore */ }
-
-        // Try to parse Dynamics error JSON
-        let parsedErr = ""
-        try {
-          const errJson = JSON.parse(errBody)
-          parsedErr = errJson?.error?.message || errJson?.Message || ""
-        } catch { /* not JSON */ }
-
-        const detail = parsedErr || errBody?.slice(0, 300) || res.statusText
-
-        if (res.status === 401) {
-          setError(`401 Unauthorized -- Your browser session is not authenticated with Dynamics 365. Open Dynamics in this browser and sign in, then try again.\n\nServer: ${detail}`)
-        } else if (res.status === 403) {
-          setError(`403 Forbidden -- You are signed in but do not have permission to access Dynamics projects.\n\nServer: ${detail}`)
-        } else if (res.status === 404) {
-          setError(`404 Not Found -- The Dynamics API endpoint could not be found. The org URL may be wrong.\n\nURL: ${DYNAMICS_API_URL}\nServer: ${detail}`)
-        } else if (res.status === 429) {
-          setError(`429 Too Many Requests -- Dynamics is rate-limiting you. Wait a moment and try again.\n\nServer: ${detail}`)
-        } else if (res.status >= 500) {
-          setError(`${res.status} Server Error -- Dynamics 365 returned a server-side error.\n\nServer: ${detail}`)
-        } else {
-          setError(`HTTP ${res.status} -- ${detail}`)
-        }
-        setStatus("error")
-        return
-      }
-
-      let data: DynamicsApiResponse
-      try {
-        data = await res.json()
-      } catch (parseErr) {
-        setError(`Response was 200 OK but the body is not valid JSON. This might mean a login redirect page was returned instead of API data.\n\nParse error: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}`)
-        setStatus("error")
-        return
-      }
-
-      if (!data.value || !Array.isArray(data.value)) {
-        setError(`Response JSON does not have a "value" array. The API returned an unexpected shape.\n\nKeys found: ${Object.keys(data).join(", ")}`)
-        setStatus("error")
-        return
-      }
-
-      const mapped = data.value.map(mapDynamicsToProject)
-      setFetched(mapped)
-
-      const autoSelected = new Set<string>()
-      for (const m of mapped) {
-        autoSelected.add(m.dynamics.dynamicsId)
-      }
-      setSelected(autoSelected)
-      setStatus("preview")
-    } catch (err) {
-      if (err instanceof DOMException && err.name === "AbortError") {
-        setError("Request timed out after 15 seconds. Dynamics may be unreachable from this network.\n\nCheck:\n- Are you on a VPN or corporate network that can reach theia.crm4.dynamics.com?\n- Is Dynamics 365 currently online?")
-      } else if (err instanceof TypeError) {
-        setError(`Network error (fetch failed) -- The browser could not connect to Dynamics at all.\n\nThis usually means:\n1. CORS: This app's domain is not allowed to call the Dynamics API. You may need to open this app from the same domain or use a proxy.\n2. DNS: theia.crm4.dynamics.com could not be resolved.\n3. Blocked: A browser extension, firewall, or CSP is blocking the request.\n\nTechnical: ${err.message}`)
-      } else {
-        setError(`Unexpected error: ${err instanceof Error ? `${err.name}: ${err.message}` : String(err)}`)
-      }
-      setStatus("error")
+    } catch (directErr) {
+      const msg = directErr instanceof DOMException && directErr.name === "AbortError"
+        ? `Timeout after 15s`
+        : directErr instanceof Error
+          ? `${directErr.name}: ${directErr.message}`
+          : String(directErr)
+      errors.push(`Direct fetch failed: ${msg}`)
     }
-  }, [])
+
+    // Attempt 2: Via server proxy (bypasses CORS)
+    if (!res || !res.ok) {
+      if (res && !res.ok) {
+        errors.push(`Direct returned HTTP ${res.status} ${res.statusText}`)
+      }
+      try {
+        usedUrl = DYNAMICS_PROXY_URL
+        res = await attemptFetch(DYNAMICS_PROXY_URL)
+      } catch (proxyErr) {
+        const msg = proxyErr instanceof DOMException && proxyErr.name === "AbortError"
+          ? `Timeout after 15s`
+          : proxyErr instanceof Error
+            ? `${proxyErr.name}: ${proxyErr.message}`
+            : String(proxyErr)
+        errors.push(`Proxy fetch failed: ${msg}`)
+      }
+    }
+
+    // No response at all -- both attempts failed at network level
+    if (!res) {
+      setError(errors.join("\n\n"))
+      setStatus("error")
+      return
+    }
+
+    // Got a response but it's not OK
+    if (!res.ok) {
+      setErrorCode(res.status)
+      let body = ""
+      try { body = await res.text() } catch { /* ignore */ }
+
+      // Try to extract a message if it's JSON
+      let jsonMsg = ""
+      try {
+        const j = JSON.parse(body)
+        jsonMsg = j?.error?.message || j?.Message || j?.message || j?.proxyError && j?.message || ""
+      } catch { /* not JSON */ }
+
+      const detail = jsonMsg || body?.slice(0, 500) || res.statusText
+      const prevErrors = errors.length > 0 ? `\n\nPrevious attempts:\n${errors.join("\n")}` : ""
+      setError(`HTTP ${res.status} from ${usedUrl}\n\n${detail}${prevErrors}`)
+      setStatus("error")
+      return
+    }
+
+    // Response is OK -- parse it
+    let data: DynamicsApiResponse
+    let rawBody = ""
+    try {
+      rawBody = await res.text()
+      data = JSON.parse(rawBody)
+    } catch (parseErr) {
+      setError(`Got 200 OK from ${usedUrl} but body is not valid JSON.\n\nFirst 500 chars of body:\n${rawBody.slice(0, 500)}\n\nParse error: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}`)
+      setStatus("error")
+      return
+    }
+
+    if (!data.value || !Array.isArray(data.value)) {
+      setError(`Got valid JSON from ${usedUrl} but no "value" array.\n\nTop-level keys: ${Object.keys(data).join(", ")}\n\nFirst 500 chars:\n${rawBody.slice(0, 500)}`)
+      setStatus("error")
+      return
+    }
+
+    const mapped = data.value.map(mapDynamicsToProject)
+    setFetched(mapped)
+
+    const autoSelected = new Set<string>()
+    for (const m of mapped) {
+      autoSelected.add(m.dynamics.dynamicsId)
+    }
+    setSelected(autoSelected)
+    setStatus("preview")
+  }, [attemptFetch])
 
   const handleImport = useCallback(() => {
     setStatus("importing")
@@ -319,34 +348,24 @@ export function DynamicsSync({ projects, onImportProjects, onUpdateProject }: Dy
           {/* ERROR */}
           {status === "error" && (
             <div className="space-y-4 py-4">
-              <div className="flex items-start gap-3 rounded-lg border border-destructive/50 bg-destructive/10 p-4">
-                <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
-                <div className="space-y-2 min-w-0 flex-1">
-                  {errorCode ? (
-                    <p className="text-sm font-medium text-destructive">HTTP {errorCode}</p>
-                  ) : (
-                    <p className="text-sm font-medium text-destructive">Connection Failed</p>
-                  )}
-                  <pre className="whitespace-pre-wrap break-words text-sm text-foreground font-mono leading-relaxed">{error}</pre>
-                  {(errorCode === 401 || errorCode === 403) && (
-                    <a
-                      href="https://theia.crm4.dynamics.com"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 text-xs text-accent hover:underline"
-                    >
-                      Open Dynamics 365 to sign in <ExternalLink className="h-3 w-3" />
-                    </a>
-                  )}
+              <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 space-y-3">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="h-4 w-4 shrink-0 text-destructive" />
+                  <span className="text-sm font-medium text-destructive">
+                    {errorCode ? `HTTP ${errorCode}` : "Request Failed"}
+                  </span>
                 </div>
-              </div>
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <span>Target:</span>
-                <code className="rounded bg-secondary px-1.5 py-0.5 font-mono text-[11px] break-all">{DYNAMICS_API_URL}</code>
+                <ScrollArea className="max-h-[300px]">
+                  <pre className="whitespace-pre-wrap break-words text-xs text-foreground font-mono leading-relaxed">{error}</pre>
+                </ScrollArea>
               </div>
               <DialogFooter className="gap-2 sm:gap-0">
-                <Button variant="ghost" onClick={handleClose}>
-                  Cancel
+                <Button variant="ghost" onClick={handleClose}>Cancel</Button>
+                <Button
+                  variant="outline"
+                  onClick={() => window.open(DYNAMICS_DIRECT_URL, "_blank")}
+                >
+                  Open URL in tab <ExternalLink className="ml-1.5 h-3 w-3" />
                 </Button>
                 <Button onClick={handleFetch}>Retry</Button>
               </DialogFooter>
