@@ -349,75 +349,136 @@ export function DynamicsSync({ projects, onImportProjects, onUpdateProject }: Dy
 
           {/* PASTE step */}
           {status === "paste" && (
-            <div className="flex flex-col gap-4 overflow-hidden">
-              <ScrollArea className="flex-1">
-                <div className="space-y-4 pr-2">
-                  {/* Projects JSON */}
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <p className="text-sm font-medium text-foreground">
-                        Projects JSON <span className="text-destructive">*</span>
-                      </p>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="gap-1.5 text-xs text-accent"
-                        onClick={() => window.open(DYNAMICS_PROJECTS_URL, "_blank")}
-                      >
-                        Open API URL <ExternalLink className="h-3 w-3" />
-                      </Button>
-                    </div>
-                    <Textarea
-                      placeholder='{"@odata.context":"...","value":[...]}'
-                      value={projectsJson}
-                      onChange={(e) => { setProjectsJson(e.target.value); setError(null) }}
-                      className="h-[140px] font-mono text-xs resize-none"
-                    />
-                  </div>
-
-                  {/* Tasks JSON (optional) */}
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <p className="text-sm font-medium text-foreground">
-                        Tasks JSON <span className="text-muted-foreground text-xs font-normal">(optional)</span>
-                      </p>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="gap-1.5 text-xs text-accent"
-                        onClick={() => window.open(DYNAMICS_TASKS_URL, "_blank")}
-                      >
-                        Open Tasks URL <ExternalLink className="h-3 w-3" />
-                      </Button>
-                    </div>
-                    <Textarea
-                      placeholder="Paste task JSON here to import tasks per project..."
-                      value={tasksJson}
-                      onChange={(e) => { setTasksJson(e.target.value); setError(null) }}
-                      className="h-[100px] font-mono text-xs resize-none"
-                    />
-                  </div>
-
-                  {error && (
-                    <div className="flex items-start gap-2 rounded-lg border border-destructive/50 bg-destructive/10 p-3">
-                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
-                      <pre className="whitespace-pre-wrap break-words text-xs text-foreground font-mono leading-relaxed overflow-hidden">{error}</pre>
-                    </div>
-                  )}
-
-                  <div className="rounded-lg bg-secondary/30 p-3 space-y-1.5">
-                    <p className="text-xs font-medium text-foreground">How to get the data</p>
-                    <ol className="space-y-1 text-xs text-muted-foreground list-decimal list-inside">
-                      <li>Click the Open URL links above (sign in to Dynamics if prompted)</li>
-                      <li>Select all (Ctrl+A / Cmd+A), copy (Ctrl+C / Cmd+C)</li>
-                      <li>Paste into the matching box above</li>
-                      <li>Tasks are optional -- import projects first, tasks can be added later</li>
-                    </ol>
-                  </div>
+            <div className="flex flex-col gap-4">
+              {/* Projects JSON */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-medium text-foreground">
+                    Projects JSON <span className="text-destructive">*</span>
+                  </p>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="gap-1.5 text-xs text-accent"
+                    onClick={() => window.open(DYNAMICS_PROJECTS_URL, "_blank")}
+                  >
+                    Open API URL <ExternalLink className="h-3 w-3" />
+                  </Button>
                 </div>
-              </ScrollArea>
+                <div
+                  className={`relative flex items-center gap-3 rounded-md border px-3 py-3 cursor-text transition-colors ${
+                    projectsJson ? "border-accent/50 bg-accent/5" : "border-input bg-transparent hover:border-accent/30"
+                  }`}
+                  onClick={() => document.getElementById("projects-paste-input")?.focus()}
+                >
+                  {/* Hidden input that captures paste */}
+                  <textarea
+                    id="projects-paste-input"
+                    className="sr-only"
+                    value=""
+                    onChange={() => {}}
+                    onPaste={(e) => {
+                      const text = e.clipboardData.getData("text")
+                      if (text) { setProjectsJson(text); setError(null) }
+                    }}
+                  />
+                  {projectsJson ? (
+                    <>
+                      <Check className="h-4 w-4 shrink-0 text-accent" />
+                      <span className="text-sm text-foreground">
+                        JSON pasted ({(projectsJson.length / 1024).toFixed(0)} KB)
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="ml-auto h-6 text-xs text-muted-foreground"
+                        onClick={(e) => { e.stopPropagation(); setProjectsJson("") }}
+                      >
+                        Clear
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <ClipboardPaste className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      <span className="text-sm text-muted-foreground">Click here and paste (Ctrl+V / Cmd+V)</span>
+                    </>
+                  )}
+                </div>
+              </div>
 
-              <DialogFooter className="gap-2 sm:gap-0 shrink-0">
+              {/* Tasks JSON (optional) */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-medium text-foreground">
+                    Tasks JSON <span className="text-muted-foreground text-xs font-normal">(optional)</span>
+                  </p>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="gap-1.5 text-xs text-accent"
+                    onClick={() => window.open(DYNAMICS_TASKS_URL, "_blank")}
+                  >
+                    Open Tasks URL <ExternalLink className="h-3 w-3" />
+                  </Button>
+                </div>
+                <div
+                  className={`relative flex items-center gap-3 rounded-md border px-3 py-3 cursor-text transition-colors ${
+                    tasksJson ? "border-violet-500/50 bg-violet-500/5" : "border-input bg-transparent hover:border-violet-500/30"
+                  }`}
+                  onClick={() => document.getElementById("tasks-paste-input")?.focus()}
+                >
+                  <textarea
+                    id="tasks-paste-input"
+                    className="sr-only"
+                    value=""
+                    onChange={() => {}}
+                    onPaste={(e) => {
+                      const text = e.clipboardData.getData("text")
+                      if (text) { setTasksJson(text); setError(null) }
+                    }}
+                  />
+                  {tasksJson ? (
+                    <>
+                      <Check className="h-4 w-4 shrink-0 text-violet-400" />
+                      <span className="text-sm text-foreground">
+                        JSON pasted ({(tasksJson.length / 1024).toFixed(0)} KB)
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="ml-auto h-6 text-xs text-muted-foreground"
+                        onClick={(e) => { e.stopPropagation(); setTasksJson("") }}
+                      >
+                        Clear
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <ClipboardPaste className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      <span className="text-sm text-muted-foreground">Click here and paste tasks (optional)</span>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {error && (
+                <div className="flex items-start gap-2 rounded-lg border border-destructive/50 bg-destructive/10 p-3">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+                  <pre className="whitespace-pre-wrap break-words text-xs text-foreground font-mono leading-relaxed overflow-hidden">{error}</pre>
+                </div>
+              )}
+
+              <div className="rounded-lg bg-secondary/30 p-3 space-y-1.5">
+                <p className="text-xs font-medium text-foreground">How to get the data</p>
+                <ol className="space-y-1 text-xs text-muted-foreground list-decimal list-inside">
+                  <li>Click an &quot;Open URL&quot; link above (sign in to Dynamics if prompted)</li>
+                  <li>Select all (Ctrl+A / Cmd+A), copy (Ctrl+C / Cmd+C)</li>
+                  <li>Click the paste area above, then paste (Ctrl+V / Cmd+V)</li>
+                  <li>Tasks are optional -- import projects first, tasks can be added later</li>
+                </ol>
+              </div>
+
+              <DialogFooter className="gap-2 sm:gap-0">
                 <Button variant="ghost" onClick={handleClose}>Cancel</Button>
                 <Button onClick={handleParse} disabled={!projectsJson.trim()} className="gap-2">
                   <ClipboardPaste className="h-4 w-4" />
@@ -429,8 +490,8 @@ export function DynamicsSync({ projects, onImportProjects, onUpdateProject }: Dy
 
           {/* PREVIEW */}
           {status === "preview" && (
-            <div className="flex flex-col gap-4 overflow-hidden">
-              <div className="flex items-center justify-between shrink-0">
+            <div className="flex flex-col min-h-0" style={{ maxHeight: "calc(80vh - 120px)" }}>
+              <div className="flex items-center justify-between shrink-0 pb-3">
                 <p className="text-sm text-muted-foreground">
                   Found <span className="font-medium text-foreground">{fetched.length}</span>{" "}
                   project{fetched.length !== 1 ? "s" : ""}
@@ -452,7 +513,7 @@ export function DynamicsSync({ projects, onImportProjects, onUpdateProject }: Dy
                 </div>
               </div>
 
-              <ScrollArea className="flex-1 max-h-[50vh]">
+              <ScrollArea className="flex-1 min-h-0">
                 <div className="space-y-2 pr-2">
                   {fetched.map((dp) => {
                     const isExisting = existingDynamicsIds.has(dp.dynamics.dynamicsId)
@@ -545,18 +606,20 @@ export function DynamicsSync({ projects, onImportProjects, onUpdateProject }: Dy
                 </div>
               </ScrollArea>
 
-              <DialogFooter className="gap-2 sm:gap-0 shrink-0">
-                <div className="mr-auto text-xs text-muted-foreground">
+              <div className="shrink-0 flex items-center justify-between border-t border-border pt-4 mt-4">
+                <div className="text-xs text-muted-foreground">
                   {selected.size} selected
                   {newCount > 0 && <span className="text-emerald-400"> ({newCount} new)</span>}
                   {updateCount > 0 && <span className="text-blue-400"> ({updateCount} update)</span>}
                 </div>
-                <Button variant="ghost" onClick={handleClose}>Cancel</Button>
-                <Button onClick={handleImport} disabled={selected.size === 0} className="gap-2">
-                  <CloudDownload className="h-4 w-4" />
-                  Import {selected.size}
-                </Button>
-              </DialogFooter>
+                <div className="flex items-center gap-2">
+                  <Button variant="ghost" onClick={handleClose}>Cancel</Button>
+                  <Button onClick={handleImport} disabled={selected.size === 0} className="gap-2">
+                    <CloudDownload className="h-4 w-4" />
+                    Import {selected.size}
+                  </Button>
+                </div>
+              </div>
             </div>
           )}
 
