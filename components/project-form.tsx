@@ -58,6 +58,8 @@ export function ProjectForm({ project, onSubmit, onCancel, trigger, open: contro
       description: description.trim(),
       startDate,
       endDate: endDate || null,
+      tasks: project?.tasks ?? [],
+      ...(project?.dynamics ? { dynamics: project.dynamics } : {}),
     })
 
     if (!project) {

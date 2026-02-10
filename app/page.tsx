@@ -86,7 +86,7 @@ export default function HomePage() {
   )
 
   const handleAddProjectToDay = useCallback(
-    (projectId: string) => {
+    (projectId: string, _taskId?: string) => {
       snapshot("Add project to day")
       addProjectToDay(selectedDate, projectId)
     },

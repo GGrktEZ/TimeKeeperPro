@@ -1,23 +1,26 @@
 "use client"
 
-import { useState, useCallback, useEffect, useRef } from "react"
+import { useState, useCallback, useMemo } from "react"
 import {
   RefreshCw, CloudDownload, Check, AlertTriangle,
-  Globe, Bookmark, Radio, Copy,
+  Globe, ClipboardPaste, ExternalLink, ChevronDown, ChevronRight, ListTodo,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog"
-import { ScrollArea } from "@/components/ui/scroll-area"
+import { Textarea } from "@/components/ui/textarea"
+
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
-import type { Project, DynamicsMetadata } from "@/lib/types"
+import type { Project, DynamicsMetadata, ProjectTask } from "@/lib/types"
 import { format, parseISO } from "date-fns"
 
-const DYNAMICS_API_URL =
+const DYNAMICS_PROJECTS_URL =
   "https://theia.crm4.dynamics.com/api/data/v9.0/msdyn_projects?$filter=statuscode%20eq%201"
+const DYNAMICS_TASKS_URL =
+  "https://theia.crm4.dynamics.com/api/data/v9.0/msdyn_projecttasks?$select=msdyn_projecttaskid,msdyn_subject,msdyn_description,_msdyn_project_value,msdyn_scheduledstart,msdyn_scheduledend,msdyn_actualstart,msdyn_actualend,msdyn_progress,msdyn_effort,msdyn_effortcompleted,msdyn_effortremaining&$filter=statecode%20eq%200"
 
-// ---- Dynamics types & mapper ----
+// ---- Dynamics raw types ----
 
 interface DynamicsProject {
   msdyn_projectid: string
@@ -46,25 +49,69 @@ interface DynamicsProject {
   modifiedon: string
 }
 
-interface DynamicsApiResponse {
-  "@odata.context": string
-  value: DynamicsProject[]
+interface DynamicsTask {
+  msdyn_projecttaskid: string
+  msdyn_subject: string
+  msdyn_description: string | null
+  _msdyn_project_value: string
+  msdyn_scheduledstart: string | null
+  msdyn_scheduledend: string | null
+  msdyn_actualstart: string | null
+  msdyn_actualend: string | null
+  msdyn_progress: number
+  msdyn_effort: number
+  msdyn_effortcompleted: number
+  msdyn_effortremaining: number
 }
 
-function mapDynamicsToProject(dp: DynamicsProject): {
+// ---- Mapped result ----
+
+interface MappedProject {
   name: string
   description: string
   startDate: string
   endDate: string | null
+  actualStart: string | null
+  scheduledStart: string | null
+  tasks: ProjectTask[]
   dynamics: DynamicsMetadata
-} {
-  const start = dp.msdyn_scheduledstart ?? dp.createdon
+}
+
+function generateId(): string {
+  return Math.random().toString(36).substring(2, 15) + Date.now().toString(36)
+}
+
+function mapDynamicsToProject(dp: DynamicsProject, tasks: DynamicsTask[]): MappedProject {
+  const actualStart = dp.msdyn_actualstart
+  const scheduledStart = dp.msdyn_scheduledstart
+  const start = actualStart ?? scheduledStart ?? dp.createdon
   const end = dp.msdyn_finish ?? dp.msdyn_scheduledend ?? dp.msdyn_actualend
+
+  const projectTasks: ProjectTask[] = tasks
+    .filter((t) => t._msdyn_project_value === dp.msdyn_projectid)
+    .map((t) => ({
+      id: generateId(),
+      name: t.msdyn_subject,
+      description: t.msdyn_description ?? "",
+      dynamicsTaskId: t.msdyn_projecttaskid,
+      scheduledStart: t.msdyn_scheduledstart,
+      scheduledEnd: t.msdyn_scheduledend,
+      actualStart: t.msdyn_actualstart,
+      actualEnd: t.msdyn_actualend,
+      progress: t.msdyn_progress ?? 0,
+      effort: t.msdyn_effort ?? 0,
+      effortCompleted: t.msdyn_effortcompleted ?? 0,
+      effortRemaining: t.msdyn_effortremaining ?? 0,
+    }))
+
   return {
     name: dp.msdyn_subject,
     description: dp.msdyn_description ?? "",
     startDate: start ? format(parseISO(start), "yyyy-MM-dd") : format(new Date(), "yyyy-MM-dd"),
     endDate: end ? format(parseISO(end), "yyyy-MM-dd") : null,
+    actualStart: actualStart,
+    scheduledStart: scheduledStart,
+    tasks: projectTasks,
     dynamics: {
       dynamicsId: dp.msdyn_projectid,
       subject: dp.msdyn_subject,
@@ -91,19 +138,9 @@ function mapDynamicsToProject(dp: DynamicsProject): {
   }
 }
 
-// ---- Generate bookmarklet code ----
-// The bookmarklet fetches Dynamics same-origin (no CORS), then POSTs the data
-// to the app's API route. The app component polls that route for results.
-
-function generateBookmarkletCode(appOrigin: string): string {
-  const receiveUrl = `${appOrigin}/api/dynamics/receive`
-  const code = `javascript:void(function(){var t=document.title;document.title='[Syncing...] '+t;fetch('${DYNAMICS_API_URL}',{credentials:'include',headers:{Accept:'application/json','OData-MaxVersion':'4.0','OData-Version':'4.0'}}).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status+' '+r.statusText);return r.json()}).then(function(d){if(!d.value||!Array.isArray(d.value))throw new Error('No value array. Keys: '+Object.keys(d).join(', '));return fetch('${receiveUrl}',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)})}).then(function(r){return r.json()}).then(function(j){document.title=t;if(j.ok)alert('Synced '+j.count+' projects! Switch back to TimeKeeper.');else alert('Send failed: '+(j.error||'Unknown error'))}).catch(function(e){document.title=t;alert('Sync failed:\\n'+e.message)})}())`
-  return code
-}
-
 // ---- Component ----
 
-type SyncStatus = "idle" | "setup" | "waiting" | "preview" | "importing" | "done" | "error"
+type SyncStatus = "idle" | "paste" | "preview" | "importing" | "done" | "error"
 
 interface DynamicsSyncProps {
   projects: Project[]
@@ -111,53 +148,93 @@ interface DynamicsSyncProps {
   onUpdateProject: (id: string, data: Partial<Project>) => void
 }
 
+function formatDate(iso: string | null): string {
+  if (!iso) return "--"
+  try {
+    return format(parseISO(iso), "MMM d, yyyy")
+  } catch {
+    return iso
+  }
+}
+
 export function DynamicsSync({ projects, onImportProjects, onUpdateProject }: DynamicsSyncProps) {
   const [open, setOpen] = useState(false)
   const [status, setStatus] = useState<SyncStatus>("idle")
   const [error, setError] = useState<string | null>(null)
-  const [fetched, setFetched] = useState<ReturnType<typeof mapDynamicsToProject>[]>([])
+  const [projectsJson, setProjectsJson] = useState("")
+  const [tasksJson, setTasksJson] = useState("")
+  const [fetched, setFetched] = useState<MappedProject[]>([])
   const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set())
   const [importResult, setImportResult] = useState<{ created: number; updated: number }>({ created: 0, updated: 0 })
-  const [bookmarkletHref, setBookmarkletHref] = useState("")
-  const [bookmarkletSaved, setBookmarkletSaved] = useState(false)
-  const listenerActive = useRef(false)
 
-  // Check if bookmarklet was saved before
-  useEffect(() => {
-    setBookmarkletSaved(localStorage.getItem("dynamics-bookmarklet-saved") === "1")
-  }, [])
-
-  // Generate bookmarklet href on mount (needs window.location.origin)
-  useEffect(() => {
-    setBookmarkletHref(generateBookmarkletCode(window.location.origin))
-  }, [])
-
-  // Poll the receive API endpoint for data from the bookmarklet
-  useEffect(() => {
-    if (!listenerActive.current) return
-    const interval = setInterval(async () => {
-      if (!listenerActive.current) return
-      try {
-        const res = await fetch("/api/dynamics/receive")
-        if (!res.ok) return
-        const json = await res.json()
-        if (!json.available) return
-        const data = json.data as DynamicsApiResponse
-        const mapped = data.value.map(mapDynamicsToProject)
-        setFetched(mapped)
-        setSelected(new Set(mapped.map((m) => m.dynamics.dynamicsId)))
-        setStatus("preview")
-      } catch (err) {
-        setError(`Failed to poll for data:\n\n${err instanceof Error ? err.message : String(err)}`)
-        setStatus("error")
-      }
-    }, 1000)
-    return () => clearInterval(interval)
-  })
-
-  const existingDynamicsIds = new Map(
-    projects.filter((p) => p.dynamics?.dynamicsId).map((p) => [p.dynamics!.dynamicsId, p])
+  const existingDynamicsIds = useMemo(
+    () => new Map(projects.filter((p) => p.dynamics?.dynamicsId).map((p) => [p.dynamics!.dynamicsId, p])),
+    [projects]
   )
+
+  function parseODataArray(raw: string, label: string): unknown[] | null {
+    const trimmed = raw.trim()
+    if (!trimmed) return []
+
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(trimmed)
+    } catch (e) {
+      setError(`Invalid JSON in ${label}: ${e instanceof Error ? e.message : String(e)}`)
+      return null
+    }
+
+    if (parsed && typeof parsed === "object" && "value" in parsed && Array.isArray((parsed as { value: unknown }).value)) {
+      return (parsed as { value: unknown[] }).value
+    }
+    if (Array.isArray(parsed)) return parsed
+
+    const keys = parsed && typeof parsed === "object" ? Object.keys(parsed).join(", ") : typeof parsed
+    setError(`Expected a JSON object with a "value" array in ${label}.\n\nGot: ${keys}`)
+    return null
+  }
+
+  const handleParse = useCallback(() => {
+    setError(null)
+
+    if (!projectsJson.trim()) {
+      setError("Paste the Projects JSON first.")
+      return
+    }
+
+    const projectArray = parseODataArray(projectsJson, "Projects") as DynamicsProject[] | null
+    if (projectArray === null) return
+
+    if (projectArray.length === 0) {
+      setError("The Projects JSON contains 0 projects.")
+      return
+    }
+
+    const first = projectArray[0]
+    if (!first.msdyn_projectid || !first.msdyn_subject) {
+      setError(`Doesn't look like Dynamics project data.\n\nFirst item keys: ${Object.keys(first).slice(0, 10).join(", ")}...`)
+      return
+    }
+
+    // Tasks are optional
+    let taskArray: DynamicsTask[] = []
+    if (tasksJson.trim()) {
+      const parsed = parseODataArray(tasksJson, "Tasks") as DynamicsTask[] | null
+      if (parsed === null) return
+      taskArray = parsed
+    }
+
+    try {
+      const mapped = projectArray.map((dp) => mapDynamicsToProject(dp, taskArray))
+      setFetched(mapped)
+      setSelected(new Set(mapped.map((m) => m.dynamics.dynamicsId)))
+      setStatus("preview")
+    } catch (e) {
+      setError(`Failed to map projects: ${e instanceof Error ? e.message : String(e)}`)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectsJson, tasksJson])
 
   const handleImport = useCallback(() => {
     setStatus("importing")
@@ -168,16 +245,31 @@ export function DynamicsSync({ projects, onImportProjects, onUpdateProject }: Dy
     for (const dp of fetched) {
       if (!selected.has(dp.dynamics.dynamicsId)) continue
       const existing = existingDynamicsIds.get(dp.dynamics.dynamicsId)
+
       if (existing) {
+        // UPDATE: merge Dynamics data but keep local data (time, color, etc.)
+        // For tasks: merge -- keep existing tasks that aren't from Dynamics, update ones that are
+        const existingTasks = existing.tasks ?? []
+        const localOnlyTasks = existingTasks.filter((t) => !t.dynamicsTaskId)
+        const mergedTasks = [...localOnlyTasks, ...dp.tasks]
+
         onUpdateProject(existing.id, {
-          name: dp.name, description: dp.description,
-          startDate: dp.startDate, endDate: dp.endDate, dynamics: dp.dynamics,
+          name: dp.name,
+          description: dp.description,
+          startDate: dp.startDate,
+          endDate: dp.endDate,
+          tasks: mergedTasks,
+          dynamics: dp.dynamics,
         })
         updated++
       } else {
         toCreate.push({
-          name: dp.name, description: dp.description,
-          startDate: dp.startDate, endDate: dp.endDate, dynamics: dp.dynamics,
+          name: dp.name,
+          description: dp.description,
+          startDate: dp.startDate,
+          endDate: dp.endDate,
+          tasks: dp.tasks,
+          dynamics: dp.dynamics,
         })
         created++
       }
@@ -189,27 +281,28 @@ export function DynamicsSync({ projects, onImportProjects, onUpdateProject }: Dy
 
   const handleClose = () => {
     setOpen(false)
-    listenerActive.current = false
     setTimeout(() => {
       setStatus("idle")
       setError(null)
+      setProjectsJson("")
+      setTasksJson("")
       setFetched([])
       setSelected(new Set())
+      setExpandedProjects(new Set())
     }, 200)
-  }
-
-  const handleStartWaiting = () => {
-    listenerActive.current = true
-    setStatus("waiting")
-  }
-
-  const handleMarkBookmarkletSaved = () => {
-    setBookmarkletSaved(true)
-    localStorage.setItem("dynamics-bookmarklet-saved", "1")
   }
 
   const toggleSelect = (id: string) => {
     setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const toggleExpand = (id: string) => {
+    setExpandedProjects((prev) => {
       const next = new Set(prev)
       if (next.has(id)) next.delete(id)
       else next.add(id)
@@ -229,20 +322,15 @@ export function DynamicsSync({ projects, onImportProjects, onUpdateProject }: Dy
     (f) => selected.has(f.dynamics.dynamicsId) && existingDynamicsIds.has(f.dynamics.dynamicsId)
   ).length
 
-  const handleOpen = () => {
-    setOpen(true)
-    if (bookmarkletSaved) {
-      handleStartWaiting()
-    } else {
-      setStatus("setup")
-    }
-  }
-
   return (
     <>
       <Tooltip>
         <TooltipTrigger asChild>
-          <Button variant="outline" className="gap-2 bg-transparent" onClick={handleOpen}>
+          <Button
+            variant="outline"
+            className="gap-2 bg-transparent"
+            onClick={() => { setOpen(true); setStatus("paste") }}
+          >
             <Globe className="h-4 w-4" />
             <span className="hidden sm:inline">Sync Dynamics</span>
           </Button>
@@ -251,7 +339,7 @@ export function DynamicsSync({ projects, onImportProjects, onUpdateProject }: Dy
       </Tooltip>
 
       <Dialog open={open} onOpenChange={(o) => !o && handleClose()}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-hidden flex flex-col">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Globe className="h-5 w-5 text-blue-400" />
@@ -259,196 +347,279 @@ export function DynamicsSync({ projects, onImportProjects, onUpdateProject }: Dy
             </DialogTitle>
           </DialogHeader>
 
-          {/* SETUP -- drag bookmarklet */}
-          {status === "setup" && (
-            <div className="space-y-5 py-2">
-              <div className="space-y-3">
-                <p className="text-sm text-muted-foreground">
-                  One-time setup: drag this button to your bookmarks bar.
-                </p>
-                <div className="flex flex-col items-center gap-3 rounded-lg border-2 border-dashed border-accent/30 bg-accent/5 py-6">
-                  {/* eslint-disable-next-line jsx-a11y/anchor-is-valid */}
-                  <a
-                    href={bookmarkletHref}
-                    onClick={(e) => e.preventDefault()}
-                    draggable
-                    className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-medium text-white shadow-md transition-transform hover:scale-105 active:scale-95 cursor-grab"
-                  >
-                    <Bookmark className="h-4 w-4" />
-                    Sync to TimeKeeper
-                  </a>
-                  <p className="text-xs text-muted-foreground">
-                    Drag above to bookmarks bar, or:
+          {/* PASTE step */}
+          {status === "paste" && (
+            <div className="flex flex-col gap-4">
+              {/* Projects JSON */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-medium text-foreground">
+                    Projects JSON <span className="text-destructive">*</span>
                   </p>
                   <Button
-                    variant="outline"
+                    variant="ghost"
                     size="sm"
-                    className="gap-1.5 text-xs"
-                    onClick={() => {
-                      navigator.clipboard.writeText(bookmarkletHref)
-                    }}
+                    className="gap-1.5 text-xs text-accent"
+                    onClick={() => window.open(DYNAMICS_PROJECTS_URL, "_blank")}
                   >
-                    <Copy className="h-3 w-3" />
-                    Copy bookmarklet code
+                    Open API URL <ExternalLink className="h-3 w-3" />
                   </Button>
                 </div>
-                <p className="text-center text-xs text-muted-foreground">
-                  If copying: create a new bookmark, paste the code as the URL
-                </p>
-              </div>
-
-              <div className="space-y-2 rounded-lg bg-secondary/30 p-4">
-                <p className="text-sm font-medium text-foreground">How it works</p>
-                <ol className="space-y-1.5 text-xs text-muted-foreground list-decimal list-inside">
-                  <li>Drag the bookmarklet to your bookmarks bar (once)</li>
-                  <li>Open <a href="https://theia.crm4.dynamics.com" target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">Dynamics 365</a> and sign in</li>
-                  <li>Click the <span className="font-medium text-foreground">Sync to TimeKeeper</span> bookmark</li>
-                  <li>Projects appear here for import</li>
-                </ol>
-                <p className="mt-2 text-[11px] text-muted-foreground">
-                  The bookmarklet fetches data directly from Dynamics using your existing browser session -- no extra login needed.
-                </p>
-              </div>
-
-              <DialogFooter className="gap-2 sm:gap-0">
-                <Button variant="ghost" onClick={handleClose}>Cancel</Button>
-                <Button
-                  onClick={() => {
-                    handleMarkBookmarkletSaved()
-                    handleStartWaiting()
-                  }}
+                <div
+                  className={`relative flex items-center gap-3 rounded-md border px-3 py-3 cursor-text transition-colors ${
+                    projectsJson ? "border-accent/50 bg-accent/5" : "border-input bg-transparent hover:border-accent/30"
+                  }`}
+                  onClick={() => document.getElementById("projects-paste-input")?.focus()}
                 >
-                  I saved it, continue
-                </Button>
-              </DialogFooter>
-            </div>
-          )}
-
-          {/* WAITING for bookmarklet data */}
-          {status === "waiting" && (
-            <div className="space-y-5 py-4">
-              <div className="flex flex-col items-center gap-4 py-6">
-                <div className="relative">
-                  <Radio className="h-10 w-10 text-accent" />
-                  <span className="absolute -top-1 -right-1 flex h-3 w-3">
-                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-75" />
-                    <span className="relative inline-flex h-3 w-3 rounded-full bg-accent" />
-                  </span>
+                  {/* Hidden input that captures paste */}
+                  <textarea
+                    id="projects-paste-input"
+                    className="sr-only"
+                    value=""
+                    onChange={() => {}}
+                    onPaste={(e) => {
+                      const text = e.clipboardData.getData("text")
+                      if (text) { setProjectsJson(text); setError(null) }
+                    }}
+                  />
+                  {projectsJson ? (
+                    <>
+                      <Check className="h-4 w-4 shrink-0 text-accent" />
+                      <span className="text-sm text-foreground">
+                        JSON pasted ({(projectsJson.length / 1024).toFixed(0)} KB)
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="ml-auto h-6 text-xs text-muted-foreground"
+                        onClick={(e) => { e.stopPropagation(); setProjectsJson("") }}
+                      >
+                        Clear
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <ClipboardPaste className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      <span className="text-sm text-muted-foreground">Click here and paste (Ctrl+V / Cmd+V)</span>
+                    </>
+                  )}
                 </div>
-                <div className="text-center space-y-1">
-                  <p className="text-sm font-medium text-foreground">Waiting for data...</p>
-                  <p className="text-xs text-muted-foreground">
-                    Go to your Dynamics 365 tab and click the <span className="font-medium text-foreground">Sync to TimeKeeper</span> bookmarklet
+              </div>
+
+              {/* Tasks JSON (optional) */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-medium text-foreground">
+                    Tasks JSON <span className="text-muted-foreground text-xs font-normal">(optional)</span>
                   </p>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="gap-1.5 text-xs text-accent"
+                    onClick={() => window.open(DYNAMICS_TASKS_URL, "_blank")}
+                  >
+                    Open Tasks URL <ExternalLink className="h-3 w-3" />
+                  </Button>
+                </div>
+                <div
+                  className={`relative flex items-center gap-3 rounded-md border px-3 py-3 cursor-text transition-colors ${
+                    tasksJson ? "border-violet-500/50 bg-violet-500/5" : "border-input bg-transparent hover:border-violet-500/30"
+                  }`}
+                  onClick={() => document.getElementById("tasks-paste-input")?.focus()}
+                >
+                  <textarea
+                    id="tasks-paste-input"
+                    className="sr-only"
+                    value=""
+                    onChange={() => {}}
+                    onPaste={(e) => {
+                      const text = e.clipboardData.getData("text")
+                      if (text) { setTasksJson(text); setError(null) }
+                    }}
+                  />
+                  {tasksJson ? (
+                    <>
+                      <Check className="h-4 w-4 shrink-0 text-violet-400" />
+                      <span className="text-sm text-foreground">
+                        JSON pasted ({(tasksJson.length / 1024).toFixed(0)} KB)
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="ml-auto h-6 text-xs text-muted-foreground"
+                        onClick={(e) => { e.stopPropagation(); setTasksJson("") }}
+                      >
+                        Clear
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <ClipboardPaste className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      <span className="text-sm text-muted-foreground">Click here and paste tasks (optional)</span>
+                    </>
+                  )}
                 </div>
               </div>
 
-              <div className="rounded-lg bg-secondary/30 p-3">
-                <p className="text-xs text-muted-foreground">
-                  Not working? Make sure you are signed into Dynamics at{" "}
-                  <a href="https://theia.crm4.dynamics.com" target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">
-                    theia.crm4.dynamics.com
-                  </a>{" "}
-                  and allow popups if prompted.
-                </p>
+              {error && (
+                <div className="flex items-start gap-2 rounded-lg border border-destructive/50 bg-destructive/10 p-3">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+                  <pre className="whitespace-pre-wrap break-words text-xs text-foreground font-mono leading-relaxed overflow-hidden">{error}</pre>
+                </div>
+              )}
+
+              <div className="rounded-lg bg-secondary/30 p-3 space-y-1.5">
+                <p className="text-xs font-medium text-foreground">How to get the data</p>
+                <ol className="space-y-1 text-xs text-muted-foreground list-decimal list-inside">
+                  <li>Click an &quot;Open URL&quot; link above (sign in to Dynamics if prompted)</li>
+                  <li>Select all (Ctrl+A / Cmd+A), copy (Ctrl+C / Cmd+C)</li>
+                  <li>Click the paste area above, then paste (Ctrl+V / Cmd+V)</li>
+                  <li>Tasks are optional -- import projects first, tasks can be added later</li>
+                </ol>
               </div>
 
               <DialogFooter className="gap-2 sm:gap-0">
-                <Button variant="ghost" size="sm" className="mr-auto text-xs" onClick={() => setStatus("setup")}>
-                  Setup bookmarklet
+                <Button variant="ghost" onClick={handleClose}>Cancel</Button>
+                <Button onClick={handleParse} disabled={!projectsJson.trim()} className="gap-2">
+                  <ClipboardPaste className="h-4 w-4" />
+                  Parse JSON
                 </Button>
-                <Button variant="ghost" onClick={handleClose}>Cancel</Button>
-              </DialogFooter>
-            </div>
-          )}
-
-          {/* ERROR */}
-          {status === "error" && (
-            <div className="space-y-4 py-4">
-              <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 space-y-3">
-                <div className="flex items-center gap-2">
-                  <AlertTriangle className="h-4 w-4 shrink-0 text-destructive" />
-                  <span className="text-sm font-medium text-destructive">Error</span>
-                </div>
-                <ScrollArea className="max-h-[300px]">
-                  <pre className="whitespace-pre-wrap break-words text-xs text-foreground font-mono leading-relaxed">{error}</pre>
-                </ScrollArea>
-              </div>
-              <DialogFooter className="gap-2 sm:gap-0">
-                <Button variant="ghost" onClick={handleClose}>Cancel</Button>
-                <Button onClick={handleStartWaiting}>Try Again</Button>
               </DialogFooter>
             </div>
           )}
 
           {/* PREVIEW */}
           {status === "preview" && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
+            <div className="flex flex-col min-h-0 overflow-hidden flex-1">
+              <div className="flex items-center justify-between shrink-0 pb-3">
                 <p className="text-sm text-muted-foreground">
                   Found <span className="font-medium text-foreground">{fetched.length}</span>{" "}
-                  active project{fetched.length !== 1 ? "s" : ""}
+                  project{fetched.length !== 1 ? "s" : ""}
+                  {fetched.reduce((acc, f) => acc + f.tasks.length, 0) > 0 && (
+                    <span>
+                      {" "}with <span className="font-medium text-foreground">
+                        {fetched.reduce((acc, f) => acc + f.tasks.length, 0)}
+                      </span> tasks
+                    </span>
+                  )}
                 </p>
-                <Button variant="ghost" size="sm" onClick={toggleAll} className="text-xs">
-                  {selected.size === fetched.length ? "Deselect All" : "Select All"}
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button variant="ghost" size="sm" onClick={() => setStatus("paste")} className="text-xs">
+                    Back
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={toggleAll} className="text-xs">
+                    {selected.size === fetched.length ? "Deselect All" : "Select All"}
+                  </Button>
+                </div>
               </div>
 
-              <ScrollArea className="h-[400px] pr-1">
-                <div className="space-y-2">
+              <div className="flex-1 min-h-0 overflow-y-auto">
+                <div className="space-y-2 pr-1">
                   {fetched.map((dp) => {
                     const isExisting = existingDynamicsIds.has(dp.dynamics.dynamicsId)
                     const isSelected = selected.has(dp.dynamics.dynamicsId)
+                    const isExpanded = expandedProjects.has(dp.dynamics.dynamicsId)
+                    const startLabel = dp.actualStart
+                      ? `Started ${formatDate(dp.actualStart)}`
+                      : dp.scheduledStart
+                        ? `Planned ${formatDate(dp.scheduledStart)}`
+                        : null
+
                     return (
-                      <button
+                      <div
                         key={dp.dynamics.dynamicsId}
-                        onClick={() => toggleSelect(dp.dynamics.dynamicsId)}
-                        className={`flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors ${
+                        className={`rounded-lg border transition-colors ${
                           isSelected ? "border-accent/50 bg-accent/5" : "border-border bg-secondary/30 opacity-60"
                         }`}
                       >
-                        <div className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border transition-colors ${
-                          isSelected ? "border-accent bg-accent text-accent-foreground" : "border-muted-foreground/30"
-                        }`}>
-                          {isSelected && <Check className="h-3 w-3" />}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2">
-                            <p className="font-medium text-foreground truncate">{dp.name}</p>
-                            {isExisting ? (
-                              <span className="shrink-0 rounded-full bg-blue-500/15 px-2 py-0.5 text-[10px] font-medium text-blue-400">Update</span>
-                            ) : (
-                              <span className="shrink-0 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-400">New</span>
+                        <button
+                          onClick={() => toggleSelect(dp.dynamics.dynamicsId)}
+                          className="flex w-full items-start gap-3 p-3 text-left"
+                        >
+                          <div className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border transition-colors ${
+                            isSelected ? "border-accent bg-accent text-accent-foreground" : "border-muted-foreground/30"
+                          }`}>
+                            {isSelected && <Check className="h-3 w-3" />}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <p className="font-medium text-foreground">{dp.name}</p>
+                              {isExisting ? (
+                                <span className="shrink-0 rounded-full bg-blue-500/15 px-2 py-0.5 text-[10px] font-medium text-blue-400">Update</span>
+                              ) : (
+                                <span className="shrink-0 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-400">New</span>
+                              )}
+                              {dp.tasks.length > 0 && (
+                                <span className="shrink-0 rounded-full bg-violet-500/15 px-2 py-0.5 text-[10px] font-medium text-violet-400">
+                                  {dp.tasks.length} task{dp.tasks.length !== 1 ? "s" : ""}
+                                </span>
+                              )}
+                            </div>
+                            {dp.description && (
+                              <p className="mt-0.5 text-xs text-muted-foreground line-clamp-2">{dp.description}</p>
+                            )}
+                            <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
+                              {startLabel && <span>{startLabel}</span>}
+                              {dp.endDate && <span>End {formatDate(dp.endDate)}</span>}
+                              {dp.dynamics.teamSize > 0 && <span>{dp.dynamics.teamSize} members</span>}
+                              {dp.dynamics.progress > 0 && <span>{dp.dynamics.progress}% done</span>}
+                            </div>
+                          </div>
+                        </button>
+
+                        {/* Expandable tasks */}
+                        {dp.tasks.length > 0 && (
+                          <div className="border-t border-border/40">
+                            <button
+                              onClick={(e) => { e.stopPropagation(); toggleExpand(dp.dynamics.dynamicsId) }}
+                              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-muted-foreground hover:text-foreground transition-colors"
+                            >
+                              {isExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                              <ListTodo className="h-3 w-3" />
+                              {dp.tasks.length} task{dp.tasks.length !== 1 ? "s" : ""}
+                            </button>
+                            {isExpanded && (
+                              <div className="px-3 pb-2 space-y-1">
+                                {dp.tasks.map((task) => (
+                                  <div
+                                    key={task.id}
+                                    className="flex items-center justify-between rounded bg-background/50 px-2.5 py-1.5 text-xs"
+                                  >
+                                    <span className="text-foreground font-medium truncate">{task.name}</span>
+                                    <div className="flex items-center gap-3 shrink-0 text-muted-foreground">
+                                      {task.actualStart ? (
+                                        <span>Started {formatDate(task.actualStart)}</span>
+                                      ) : task.scheduledStart ? (
+                                        <span className="italic">Planned {formatDate(task.scheduledStart)}</span>
+                                      ) : null}
+                                      {task.progress > 0 && <span>{task.progress}%</span>}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
                             )}
                           </div>
-                          {dp.description && (
-                            <p className="mt-0.5 text-xs text-muted-foreground truncate">{dp.description}</p>
-                          )}
-                          <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
-                            <span>{dp.startDate}{dp.endDate ? ` - ${dp.endDate}` : ""}</span>
-                            {dp.dynamics.teamSize > 0 && <span>{dp.dynamics.teamSize} members</span>}
-                            {dp.dynamics.duration != null && <span>{dp.dynamics.duration} days</span>}
-                            {dp.dynamics.progress > 0 && <span>{dp.dynamics.progress}% done</span>}
-                          </div>
-                        </div>
-                      </button>
+                        )}
+                      </div>
                     )
                   })}
                 </div>
-              </ScrollArea>
+              </div>
 
-              <DialogFooter className="gap-2 sm:gap-0">
-                <div className="mr-auto text-xs text-muted-foreground">
+              <div className="shrink-0 flex items-center justify-between border-t border-border pt-4 mt-4">
+                <div className="text-xs text-muted-foreground">
                   {selected.size} selected
                   {newCount > 0 && <span className="text-emerald-400"> ({newCount} new)</span>}
                   {updateCount > 0 && <span className="text-blue-400"> ({updateCount} update)</span>}
                 </div>
-                <Button variant="ghost" onClick={handleClose}>Cancel</Button>
-                <Button onClick={handleImport} disabled={selected.size === 0} className="gap-2">
-                  <CloudDownload className="h-4 w-4" />
-                  Import {selected.size}
-                </Button>
-              </DialogFooter>
+                <div className="flex items-center gap-2">
+                  <Button variant="ghost" onClick={handleClose}>Cancel</Button>
+                  <Button onClick={handleImport} disabled={selected.size === 0} className="gap-2">
+                    <CloudDownload className="h-4 w-4" />
+                    Import {selected.size}
+                  </Button>
+                </div>
+              </div>
             </div>
           )}
 
@@ -463,17 +634,17 @@ export function DynamicsSync({ projects, onImportProjects, onUpdateProject }: Dy
           {/* DONE */}
           {status === "done" && (
             <div className="space-y-4 py-4">
-              <div className="flex flex-col items-center gap-3 py-4">
+              <div className="flex flex-col items-center gap-3 py-6">
                 <div className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-500/15">
                   <Check className="h-6 w-6 text-emerald-400" />
                 </div>
-                <div className="text-center">
-                  <p className="font-medium text-foreground">Sync Complete</p>
-                  <p className="mt-1 text-sm text-muted-foreground">
+                <div className="text-center space-y-1">
+                  <p className="text-sm font-medium text-foreground">Import complete</p>
+                  <p className="text-xs text-muted-foreground">
                     {importResult.created > 0 && (
-                      <span className="text-emerald-400">{importResult.created} imported</span>
+                      <span className="text-emerald-400">{importResult.created} created</span>
                     )}
-                    {importResult.created > 0 && importResult.updated > 0 && " and "}
+                    {importResult.created > 0 && importResult.updated > 0 && ", "}
                     {importResult.updated > 0 && (
                       <span className="text-blue-400">{importResult.updated} updated</span>
                     )}

@@ -3,7 +3,7 @@
 import React from "react"
 
 import { useState } from "react"
-import { Calendar, Edit2, Trash2, MoreVertical, Globe } from "lucide-react"
+import { Calendar, Edit2, Trash2, MoreVertical, Globe, ListTodo } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import {
@@ -184,6 +184,15 @@ export function ProjectCard({ project, entries, onUpdate, onDelete }: ProjectCar
               <span className="text-muted-foreground">Sessions:</span>
               <span className="font-medium text-foreground">{quickStats.sessionsCount}</span>
             </div>
+            {(project.tasks?.length ?? 0) > 0 && (
+              <>
+                <span className="text-muted-foreground/40">|</span>
+                <div className="flex items-center gap-1.5 text-xs">
+                  <ListTodo className="h-3 w-3 text-muted-foreground" />
+                  <span className="font-medium text-foreground">{project.tasks.length} task{project.tasks.length !== 1 ? "s" : ""}</span>
+                </div>
+              </>
+            )}
           </div>
         </CardContent>
       </Card>
