@@ -1,23 +1,32 @@
 "use client"
 
-import { useState, useCallback } from "react"
-import { RefreshCw, CloudDownload, Check, AlertTriangle, ExternalLink, Globe } from "lucide-react"
-import { Button } from "@/components/ui/button"
+import { useState, useCallback, useEffect } from "react"
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
+  RefreshCw, CloudDownload, Check, AlertTriangle, ExternalLink,
+  Globe, LogIn, LogOut, Settings2, User,
+} from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 import type { Project, DynamicsMetadata } from "@/lib/types"
+import {
+  getSavedMsalConfig, saveMsalConfig, clearMsalConfig,
+  acquireDynamicsToken, logoutMsal, getActiveAccount,
+  type MsalConfig,
+} from "@/lib/msal"
 import { format, parseISO } from "date-fns"
+import type { AccountInfo } from "@azure/msal-browser"
 
-const DYNAMICS_DIRECT_URL =
+const DYNAMICS_API_URL =
   "https://theia.crm4.dynamics.com/api/data/v9.0/msdyn_projects?$filter=statuscode%20eq%201"
-const DYNAMICS_PROXY_URL = "/api/dynamics"
+const PROXY_URL = "/api/dynamics"
+
+// ---- Dynamics types & mapper (unchanged) ----
 
 interface DynamicsProject {
   msdyn_projectid: string
@@ -60,7 +69,6 @@ function mapDynamicsToProject(dp: DynamicsProject): {
 } {
   const start = dp.msdyn_scheduledstart ?? dp.createdon
   const end = dp.msdyn_finish ?? dp.msdyn_scheduledend ?? dp.msdyn_actualend
-
   return {
     name: dp.msdyn_subject,
     description: dp.msdyn_description ?? "",
@@ -92,7 +100,9 @@ function mapDynamicsToProject(dp: DynamicsProject): {
   }
 }
 
-type SyncStatus = "idle" | "fetching" | "preview" | "importing" | "done" | "error"
+// ---- Component ----
+
+type SyncStatus = "idle" | "config" | "authenticating" | "fetching" | "preview" | "importing" | "done" | "error"
 
 interface DynamicsSyncProps {
   projects: Project[]
@@ -107,175 +117,183 @@ export function DynamicsSync({ projects, onImportProjects, onUpdateProject }: Dy
   const [errorCode, setErrorCode] = useState<number | null>(null)
   const [fetched, setFetched] = useState<ReturnType<typeof mapDynamicsToProject>[]>([])
   const [selected, setSelected] = useState<Set<string>>(new Set())
-  const [importResult, setImportResult] = useState<{ created: number; updated: number }>({
-    created: 0,
-    updated: 0,
-  })
+  const [importResult, setImportResult] = useState<{ created: number; updated: number }>({ created: 0, updated: 0 })
+
+  // Auth state
+  const [msalConfig, setMsalConfig] = useState<MsalConfig | null>(null)
+  const [account, setAccount] = useState<AccountInfo | null>(null)
+  const [configDraft, setConfigDraft] = useState({ clientId: "", tenantId: "" })
+  const [showConfig, setShowConfig] = useState(false)
+
+  // Load saved config on mount
+  useEffect(() => {
+    const saved = getSavedMsalConfig()
+    if (saved) {
+      setMsalConfig(saved)
+      setConfigDraft({ clientId: saved.clientId, tenantId: saved.tenantId })
+      // Check if we have a cached account
+      getActiveAccount(saved).then(setAccount).catch(() => {})
+    }
+  }, [])
 
   const existingDynamicsIds = new Map(
     projects.filter((p) => p.dynamics?.dynamicsId).map((p) => [p.dynamics!.dynamicsId, p])
   )
 
-  const attemptFetch = useCallback(async (url: string, opts?: RequestInit): Promise<Response> => {
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 15000)
-    try {
-      const res = await fetch(url, { ...opts, signal: controller.signal })
-      clearTimeout(timeout)
-      return res
-    } catch (err) {
-      clearTimeout(timeout)
-      throw err
+  const handleSaveConfig = () => {
+    if (!configDraft.clientId.trim() || !configDraft.tenantId.trim()) return
+    const cfg: MsalConfig = {
+      clientId: configDraft.clientId.trim(),
+      tenantId: configDraft.tenantId.trim(),
     }
-  }, [])
+    saveMsalConfig(cfg)
+    setMsalConfig(cfg)
+    setShowConfig(false)
+    setAccount(null) // Reset account since config changed
+  }
 
-  const handleFetch = useCallback(async () => {
+  const handleSignIn = useCallback(async () => {
+    if (!msalConfig) {
+      setShowConfig(true)
+      return
+    }
+    setStatus("authenticating")
+    setError(null)
+    try {
+      const token = await acquireDynamicsToken(msalConfig)
+      const acc = await getActiveAccount(msalConfig)
+      setAccount(acc)
+      // Immediately fetch after sign-in
+      await fetchProjects(token)
+    } catch (err) {
+      const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err)
+      setError(`Microsoft sign-in failed:\n\n${msg}`)
+      setStatus("error")
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [msalConfig])
+
+  const handleSignOut = useCallback(async () => {
+    if (!msalConfig) return
+    try {
+      await logoutMsal(msalConfig)
+    } catch { /* ignore */ }
+    setAccount(null)
+  }, [msalConfig])
+
+  const handleDisconnect = () => {
+    clearMsalConfig()
+    setMsalConfig(null)
+    setAccount(null)
+    setConfigDraft({ clientId: "", tenantId: "" })
+  }
+
+  const fetchProjects = useCallback(async (token: string) => {
     setStatus("fetching")
     setError(null)
     setErrorCode(null)
 
-    let res: Response | null = null
-    let usedUrl = ""
-    const errors: string[] = []
-
-    // Attempt 1: Direct to Dynamics (works if same-origin / CORS allowed)
     try {
-      usedUrl = DYNAMICS_DIRECT_URL
-      res = await attemptFetch(DYNAMICS_DIRECT_URL, {
-        credentials: "include",
+      // Use proxy to bypass CORS, passing the Bearer token
+      const res = await fetch(PROXY_URL, {
         headers: {
-          Accept: "application/json",
-          "OData-MaxVersion": "4.0",
-          "OData-Version": "4.0",
+          "X-Dynamics-Token": token,
         },
       })
-    } catch (directErr) {
-      const msg = directErr instanceof DOMException && directErr.name === "AbortError"
-        ? `Timeout after 15s`
-        : directErr instanceof Error
-          ? `${directErr.name}: ${directErr.message}`
-          : String(directErr)
-      errors.push(`Direct fetch failed: ${msg}`)
-    }
 
-    // Attempt 2: Via server proxy (bypasses CORS)
-    if (!res || !res.ok) {
-      if (res && !res.ok) {
-        errors.push(`Direct returned HTTP ${res.status} ${res.statusText}`)
+      if (!res.ok) {
+        setErrorCode(res.status)
+        let body = ""
+        try { body = await res.text() } catch { /* */ }
+
+        let jsonMsg = ""
+        try {
+          const j = JSON.parse(body)
+          jsonMsg = j?.error?.message || j?.Message || j?.message || ""
+        } catch { /* */ }
+
+        setError(`HTTP ${res.status}\n\n${jsonMsg || body?.slice(0, 500) || res.statusText}`)
+        setStatus("error")
+        return
       }
+
+      let rawBody = ""
+      let data: DynamicsApiResponse
       try {
-        usedUrl = DYNAMICS_PROXY_URL
-        res = await attemptFetch(DYNAMICS_PROXY_URL)
-      } catch (proxyErr) {
-        const msg = proxyErr instanceof DOMException && proxyErr.name === "AbortError"
-          ? `Timeout after 15s`
-          : proxyErr instanceof Error
-            ? `${proxyErr.name}: ${proxyErr.message}`
-            : String(proxyErr)
-        errors.push(`Proxy fetch failed: ${msg}`)
+        rawBody = await res.text()
+        data = JSON.parse(rawBody)
+      } catch (parseErr) {
+        setError(`Response is not valid JSON.\n\nFirst 500 chars:\n${rawBody.slice(0, 500)}\n\n${parseErr instanceof Error ? parseErr.message : String(parseErr)}`)
+        setStatus("error")
+        return
       }
-    }
 
-    // No response at all -- both attempts failed at network level
-    if (!res) {
-      setError(errors.join("\n\n"))
+      if (!data.value || !Array.isArray(data.value)) {
+        setError(`Response has no "value" array.\n\nKeys: ${Object.keys(data).join(", ")}\n\nFirst 500 chars:\n${rawBody.slice(0, 500)}`)
+        setStatus("error")
+        return
+      }
+
+      const mapped = data.value.map(mapDynamicsToProject)
+      setFetched(mapped)
+      setSelected(new Set(mapped.map((m) => m.dynamics.dynamicsId)))
+      setStatus("preview")
+    } catch (err) {
+      setError(`Fetch failed:\n\n${err instanceof Error ? `${err.name}: ${err.message}` : String(err)}`)
       setStatus("error")
+    }
+  }, [])
+
+  const handleFetch = useCallback(async () => {
+    if (!msalConfig) {
+      setShowConfig(true)
       return
     }
-
-    // Got a response but it's not OK
-    if (!res.ok) {
-      setErrorCode(res.status)
-      let body = ""
-      try { body = await res.text() } catch { /* ignore */ }
-
-      // Try to extract a message if it's JSON
-      let jsonMsg = ""
-      try {
-        const j = JSON.parse(body)
-        jsonMsg = j?.error?.message || j?.Message || j?.message || j?.proxyError && j?.message || ""
-      } catch { /* not JSON */ }
-
-      const detail = jsonMsg || body?.slice(0, 500) || res.statusText
-      const prevErrors = errors.length > 0 ? `\n\nPrevious attempts:\n${errors.join("\n")}` : ""
-      setError(`HTTP ${res.status} from ${usedUrl}\n\n${detail}${prevErrors}`)
-      setStatus("error")
-      return
-    }
-
-    // Response is OK -- parse it
-    let data: DynamicsApiResponse
-    let rawBody = ""
+    setStatus("authenticating")
+    setError(null)
     try {
-      rawBody = await res.text()
-      data = JSON.parse(rawBody)
-    } catch (parseErr) {
-      setError(`Got 200 OK from ${usedUrl} but body is not valid JSON.\n\nFirst 500 chars of body:\n${rawBody.slice(0, 500)}\n\nParse error: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}`)
+      const token = await acquireDynamicsToken(msalConfig)
+      const acc = await getActiveAccount(msalConfig)
+      setAccount(acc)
+      await fetchProjects(token)
+    } catch (err) {
+      const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err)
+      setError(`Token acquisition failed:\n\n${msg}`)
       setStatus("error")
-      return
     }
-
-    if (!data.value || !Array.isArray(data.value)) {
-      setError(`Got valid JSON from ${usedUrl} but no "value" array.\n\nTop-level keys: ${Object.keys(data).join(", ")}\n\nFirst 500 chars:\n${rawBody.slice(0, 500)}`)
-      setStatus("error")
-      return
-    }
-
-    const mapped = data.value.map(mapDynamicsToProject)
-    setFetched(mapped)
-
-    const autoSelected = new Set<string>()
-    for (const m of mapped) {
-      autoSelected.add(m.dynamics.dynamicsId)
-    }
-    setSelected(autoSelected)
-    setStatus("preview")
-  }, [attemptFetch])
+  }, [msalConfig, fetchProjects])
 
   const handleImport = useCallback(() => {
     setStatus("importing")
     let created = 0
     let updated = 0
-
     const toCreate: Omit<Project, "id" | "color" | "createdAt" | "updatedAt">[] = []
 
     for (const dp of fetched) {
       if (!selected.has(dp.dynamics.dynamicsId)) continue
-
       const existing = existingDynamicsIds.get(dp.dynamics.dynamicsId)
       if (existing) {
-        // Update existing project with latest Dynamics data
         onUpdateProject(existing.id, {
-          name: dp.name,
-          description: dp.description,
-          startDate: dp.startDate,
-          endDate: dp.endDate,
-          dynamics: dp.dynamics,
+          name: dp.name, description: dp.description,
+          startDate: dp.startDate, endDate: dp.endDate, dynamics: dp.dynamics,
         })
         updated++
       } else {
         toCreate.push({
-          name: dp.name,
-          description: dp.description,
-          startDate: dp.startDate,
-          endDate: dp.endDate,
-          dynamics: dp.dynamics,
+          name: dp.name, description: dp.description,
+          startDate: dp.startDate, endDate: dp.endDate, dynamics: dp.dynamics,
         })
         created++
       }
     }
-
-    if (toCreate.length > 0) {
-      onImportProjects(toCreate)
-    }
-
+    if (toCreate.length > 0) onImportProjects(toCreate)
     setImportResult({ created, updated })
     setStatus("done")
   }, [fetched, selected, existingDynamicsIds, onImportProjects, onUpdateProject])
 
   const handleClose = () => {
     setOpen(false)
-    // Reset after animation
+    setShowConfig(false)
     setTimeout(() => {
       setStatus("idle")
       setError(null)
@@ -295,11 +313,8 @@ export function DynamicsSync({ projects, onImportProjects, onUpdateProject }: Dy
   }
 
   const toggleAll = () => {
-    if (selected.size === fetched.length) {
-      setSelected(new Set())
-    } else {
-      setSelected(new Set(fetched.map((f) => f.dynamics.dynamicsId)))
-    }
+    if (selected.size === fetched.length) setSelected(new Set())
+    else setSelected(new Set(fetched.map((f) => f.dynamics.dynamicsId)))
   }
 
   const newCount = fetched.filter(
@@ -309,18 +324,20 @@ export function DynamicsSync({ projects, onImportProjects, onUpdateProject }: Dy
     (f) => selected.has(f.dynamics.dynamicsId) && existingDynamicsIds.has(f.dynamics.dynamicsId)
   ).length
 
+  const handleOpen = () => {
+    setOpen(true)
+    if (!msalConfig) {
+      setShowConfig(true)
+    } else {
+      handleFetch()
+    }
+  }
+
   return (
     <>
       <Tooltip>
         <TooltipTrigger asChild>
-          <Button
-            variant="outline"
-            className="gap-2 bg-transparent"
-            onClick={() => {
-              setOpen(true)
-              handleFetch()
-            }}
-          >
+          <Button variant="outline" className="gap-2 bg-transparent" onClick={handleOpen}>
             <Globe className="h-4 w-4" />
             <span className="hidden sm:inline">Sync Dynamics</span>
           </Button>
@@ -334,8 +351,73 @@ export function DynamicsSync({ projects, onImportProjects, onUpdateProject }: Dy
             <DialogTitle className="flex items-center gap-2">
               <Globe className="h-5 w-5 text-blue-400" />
               Dynamics 365 Sync
+              {account && (
+                <span className="ml-auto flex items-center gap-1.5 text-xs font-normal text-muted-foreground">
+                  <User className="h-3 w-3" />
+                  {account.username}
+                </span>
+              )}
             </DialogTitle>
           </DialogHeader>
+
+          {/* CONFIG / SETUP */}
+          {(showConfig || (status === "idle" && !msalConfig)) && (
+            <div className="space-y-4 py-2">
+              <p className="text-sm text-muted-foreground">
+                To connect to Dynamics 365, you need an Azure AD App Registration with
+                the <code className="rounded bg-secondary px-1 py-0.5 text-xs">Dynamics CRM user_impersonation</code> permission.
+              </p>
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="clientId" className="text-xs">Application (Client) ID</Label>
+                  <Input
+                    id="clientId"
+                    placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                    value={configDraft.clientId}
+                    onChange={(e) => setConfigDraft((d) => ({ ...d, clientId: e.target.value }))}
+                    className="font-mono text-sm"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="tenantId" className="text-xs">Directory (Tenant) ID</Label>
+                  <Input
+                    id="tenantId"
+                    placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                    value={configDraft.tenantId}
+                    onChange={(e) => setConfigDraft((d) => ({ ...d, tenantId: e.target.value }))}
+                    className="font-mono text-sm"
+                  />
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                These are saved in your browser only. Find them in Azure Portal under App Registrations.
+                Make sure <code className="rounded bg-secondary px-1 py-0.5 text-[11px]">Single-page application</code> redirect URI is set to <code className="rounded bg-secondary px-1 py-0.5 text-[11px]">{typeof window !== "undefined" ? window.location.origin : "your-app-url"}</code>.
+              </p>
+              <DialogFooter className="gap-2 sm:gap-0">
+                {msalConfig && (
+                  <Button variant="ghost" size="sm" className="mr-auto text-xs text-destructive" onClick={handleDisconnect}>
+                    Disconnect
+                  </Button>
+                )}
+                <Button variant="ghost" onClick={handleClose}>Cancel</Button>
+                <Button
+                  onClick={handleSaveConfig}
+                  disabled={!configDraft.clientId.trim() || !configDraft.tenantId.trim()}
+                >
+                  Save & Connect
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
+
+          {/* AUTHENTICATING */}
+          {status === "authenticating" && (
+            <div className="flex flex-col items-center gap-3 py-12">
+              <LogIn className="h-8 w-8 animate-pulse text-blue-400" />
+              <p className="text-sm text-muted-foreground">Signing in with Microsoft...</p>
+              <p className="text-xs text-muted-foreground">A popup window should appear. Complete the sign-in there.</p>
+            </div>
+          )}
 
           {/* FETCHING */}
           {status === "fetching" && (
@@ -352,7 +434,7 @@ export function DynamicsSync({ projects, onImportProjects, onUpdateProject }: Dy
                 <div className="flex items-center gap-2">
                   <AlertTriangle className="h-4 w-4 shrink-0 text-destructive" />
                   <span className="text-sm font-medium text-destructive">
-                    {errorCode ? `HTTP ${errorCode}` : "Request Failed"}
+                    {errorCode ? `HTTP ${errorCode}` : "Error"}
                   </span>
                 </div>
                 <ScrollArea className="max-h-[300px]">
@@ -360,29 +442,36 @@ export function DynamicsSync({ projects, onImportProjects, onUpdateProject }: Dy
                 </ScrollArea>
               </div>
               <DialogFooter className="gap-2 sm:gap-0">
-                <Button variant="ghost" onClick={handleClose}>Cancel</Button>
-                <Button
-                  variant="outline"
-                  onClick={() => window.open(DYNAMICS_DIRECT_URL, "_blank")}
-                >
-                  Open URL in tab <ExternalLink className="ml-1.5 h-3 w-3" />
+                <Button variant="ghost" size="sm" className="mr-auto gap-1 text-xs" onClick={() => setShowConfig(true)}>
+                  <Settings2 className="h-3 w-3" /> Config
                 </Button>
+                <Button variant="ghost" onClick={handleClose}>Cancel</Button>
                 <Button onClick={handleFetch}>Retry</Button>
               </DialogFooter>
             </div>
           )}
 
           {/* PREVIEW */}
-          {status === "preview" && (
+          {status === "preview" && !showConfig && (
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <p className="text-sm text-muted-foreground">
                   Found <span className="font-medium text-foreground">{fetched.length}</span>{" "}
-                  active project{fetched.length !== 1 ? "s" : ""} in Dynamics
+                  active project{fetched.length !== 1 ? "s" : ""}
                 </p>
-                <Button variant="ghost" size="sm" onClick={toggleAll} className="text-xs">
-                  {selected.size === fetched.length ? "Deselect All" : "Select All"}
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button variant="ghost" size="sm" onClick={() => setShowConfig(true)} className="gap-1 text-xs text-muted-foreground">
+                    <Settings2 className="h-3 w-3" />
+                  </Button>
+                  {account && (
+                    <Button variant="ghost" size="sm" onClick={handleSignOut} className="gap-1 text-xs text-muted-foreground">
+                      <LogOut className="h-3 w-3" /> Sign Out
+                    </Button>
+                  )}
+                  <Button variant="ghost" size="sm" onClick={toggleAll} className="text-xs">
+                    {selected.size === fetched.length ? "Deselect All" : "Select All"}
+                  </Button>
+                </div>
               </div>
 
               <ScrollArea className="h-[400px] pr-1">
@@ -390,59 +479,36 @@ export function DynamicsSync({ projects, onImportProjects, onUpdateProject }: Dy
                   {fetched.map((dp) => {
                     const isExisting = existingDynamicsIds.has(dp.dynamics.dynamicsId)
                     const isSelected = selected.has(dp.dynamics.dynamicsId)
-
                     return (
                       <button
                         key={dp.dynamics.dynamicsId}
                         onClick={() => toggleSelect(dp.dynamics.dynamicsId)}
                         className={`flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors ${
-                          isSelected
-                            ? "border-accent/50 bg-accent/5"
-                            : "border-border bg-secondary/30 opacity-60"
+                          isSelected ? "border-accent/50 bg-accent/5" : "border-border bg-secondary/30 opacity-60"
                         }`}
                       >
-                        <div
-                          className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border transition-colors ${
-                            isSelected
-                              ? "border-accent bg-accent text-accent-foreground"
-                              : "border-muted-foreground/30"
-                          }`}
-                        >
+                        <div className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border transition-colors ${
+                          isSelected ? "border-accent bg-accent text-accent-foreground" : "border-muted-foreground/30"
+                        }`}>
                           {isSelected && <Check className="h-3 w-3" />}
                         </div>
-
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2">
                             <p className="font-medium text-foreground truncate">{dp.name}</p>
                             {isExisting ? (
-                              <span className="shrink-0 rounded-full bg-blue-500/15 px-2 py-0.5 text-[10px] font-medium text-blue-400">
-                                Update
-                              </span>
+                              <span className="shrink-0 rounded-full bg-blue-500/15 px-2 py-0.5 text-[10px] font-medium text-blue-400">Update</span>
                             ) : (
-                              <span className="shrink-0 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-400">
-                                New
-                              </span>
+                              <span className="shrink-0 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-400">New</span>
                             )}
                           </div>
                           {dp.description && (
-                            <p className="mt-0.5 text-xs text-muted-foreground truncate">
-                              {dp.description}
-                            </p>
+                            <p className="mt-0.5 text-xs text-muted-foreground truncate">{dp.description}</p>
                           )}
                           <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
-                            <span>
-                              {dp.startDate}
-                              {dp.endDate ? ` - ${dp.endDate}` : ""}
-                            </span>
-                            {dp.dynamics.teamSize > 0 && (
-                              <span>{dp.dynamics.teamSize} team members</span>
-                            )}
-                            {dp.dynamics.duration != null && (
-                              <span>{dp.dynamics.duration} days</span>
-                            )}
-                            {dp.dynamics.progress > 0 && (
-                              <span>{dp.dynamics.progress}% progress</span>
-                            )}
+                            <span>{dp.startDate}{dp.endDate ? ` - ${dp.endDate}` : ""}</span>
+                            {dp.dynamics.teamSize > 0 && <span>{dp.dynamics.teamSize} members</span>}
+                            {dp.dynamics.duration != null && <span>{dp.dynamics.duration} days</span>}
+                            {dp.dynamics.progress > 0 && <span>{dp.dynamics.progress}% done</span>}
                           </div>
                         </div>
                       </button>
@@ -454,23 +520,13 @@ export function DynamicsSync({ projects, onImportProjects, onUpdateProject }: Dy
               <DialogFooter className="gap-2 sm:gap-0">
                 <div className="mr-auto text-xs text-muted-foreground">
                   {selected.size} selected
-                  {newCount > 0 && (
-                    <span className="text-emerald-400"> ({newCount} new)</span>
-                  )}
-                  {updateCount > 0 && (
-                    <span className="text-blue-400"> ({updateCount} update)</span>
-                  )}
+                  {newCount > 0 && <span className="text-emerald-400"> ({newCount} new)</span>}
+                  {updateCount > 0 && <span className="text-blue-400"> ({updateCount} update)</span>}
                 </div>
-                <Button variant="ghost" onClick={handleClose}>
-                  Cancel
-                </Button>
-                <Button
-                  onClick={handleImport}
-                  disabled={selected.size === 0}
-                  className="gap-2"
-                >
+                <Button variant="ghost" onClick={handleClose}>Cancel</Button>
+                <Button onClick={handleImport} disabled={selected.size === 0} className="gap-2">
                   <CloudDownload className="h-4 w-4" />
-                  Import {selected.size} Project{selected.size !== 1 ? "s" : ""}
+                  Import {selected.size}
                 </Button>
               </DialogFooter>
             </div>
@@ -495,15 +551,11 @@ export function DynamicsSync({ projects, onImportProjects, onUpdateProject }: Dy
                   <p className="font-medium text-foreground">Sync Complete</p>
                   <p className="mt-1 text-sm text-muted-foreground">
                     {importResult.created > 0 && (
-                      <span className="text-emerald-400">
-                        {importResult.created} new project{importResult.created !== 1 ? "s" : ""} imported
-                      </span>
+                      <span className="text-emerald-400">{importResult.created} imported</span>
                     )}
                     {importResult.created > 0 && importResult.updated > 0 && " and "}
                     {importResult.updated > 0 && (
-                      <span className="text-blue-400">
-                        {importResult.updated} project{importResult.updated !== 1 ? "s" : ""} updated
-                      </span>
+                      <span className="text-blue-400">{importResult.updated} updated</span>
                     )}
                   </p>
                 </div>
