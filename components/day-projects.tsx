@@ -3,19 +3,26 @@
 import React from "react"
 
 import { Trash2, FolderKanban, Clock, Plus, Play, Square, CheckCircle2, ListTodo, ChevronDown, ChevronUp, GripVertical } from "lucide-react"
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { ProjectSelector } from "./project-selector"
 import { AutoResizeTextarea } from "@/components/ui/auto-resize-textarea"
-import type { Project, DayProjectEntry, WorkSession } from "@/lib/types"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import type { Project, ProjectTask, DayProjectEntry, WorkSession } from "@/lib/types"
 
 interface DayProjectsProps {
   projects: Project[]
   dayProjects: DayProjectEntry[]
-  onAddProject: (projectId: string) => void
+  onAddProject: (projectId: string, taskId?: string) => void
   onUpdateProject: (projectEntryId: string, data: Partial<DayProjectEntry>) => void
   onRemoveProject: (projectEntryId: string) => void
   onReorderProjects: (fromIndex: number, toIndex: number) => void
@@ -193,9 +200,14 @@ function WorkSessionItem({
     >
       {/* Session Header */}
       <div className="flex items-center gap-2 p-2">
-        <span className="w-6 shrink-0 text-center text-xs text-muted-foreground">
-          {index + 1}.
-        </span>
+        <div className="w-auto shrink-0 flex items-center gap-1.5 text-xs text-muted-foreground">
+          <span className="w-4 text-center">{index + 1}.</span>
+          {session.taskName && (
+            <span className="rounded bg-accent/10 px-1.5 py-0.5 text-[11px] text-accent font-medium truncate max-w-[100px]" title={session.taskName}>
+              {session.taskName}
+            </span>
+          )}
+        </div>
         <div className="grid flex-1 grid-cols-2 gap-2">
           <div className="flex gap-1">
             <Input
@@ -356,14 +368,16 @@ export function DayProjects({
     return sessions.some(s => s.start && !s.end)
   }
 
-  // Start a new session with current time
-  const startNewSession = (projectEntryId: string, currentSessions: WorkSession[]) => {
+  // Start a new session with current time, optionally for a specific task
+  const startNewSession = (projectEntryId: string, currentSessions: WorkSession[], task?: ProjectTask) => {
     const now = new Date()
     const timeString = now.toTimeString().slice(0, 5)
     const newSession: WorkSession = {
       id: generateId(),
       start: timeString,
       end: "",
+      taskId: task?.id,
+      taskName: task?.name,
       doneNotes: "",
       todoNotes: "",
     }
@@ -393,7 +407,7 @@ export function DayProjects({
           <ProjectSelector
             projects={projects}
             selectedProjectIds={selectedProjectIds}
-            onSelectProject={onAddProject}
+            onSelectProject={(projectId, taskId) => onAddProject(projectId, taskId)}
           />
         </div>
       </CardHeader>
@@ -465,15 +479,48 @@ export function DayProjects({
                   {/* Quick Start/Stop Buttons */}
                   <div className="mb-3 flex gap-2">
                     {!isActive ? (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => startNewSession(dayProject.id, sessions)}
-                        className="h-8 gap-1.5 bg-transparent text-xs"
-                      >
-                        <Play className="h-3 w-3" />
-                        Start Working
-                      </Button>
+                      (project.tasks?.length ?? 0) > 0 ? (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-8 gap-1.5 bg-transparent text-xs"
+                            >
+                              <Play className="h-3 w-3" />
+                              Start Working
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="start" className="w-64">
+                            <DropdownMenuLabel className="text-xs text-muted-foreground font-normal">
+                              Which task?
+                            </DropdownMenuLabel>
+                            <DropdownMenuItem onClick={() => startNewSession(dayProject.id, sessions)}>
+                              General work
+                            </DropdownMenuItem>
+                            {(project.tasks ?? []).map((task) => (
+                              <DropdownMenuItem
+                                key={task.id}
+                                onClick={() => startNewSession(dayProject.id, sessions, task)}
+                                className="gap-2"
+                              >
+                                <ListTodo className="h-3 w-3 shrink-0 text-muted-foreground" />
+                                <span className="truncate">{task.name}</span>
+                              </DropdownMenuItem>
+                            ))}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      ) : (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => startNewSession(dayProject.id, sessions)}
+                          className="h-8 gap-1.5 bg-transparent text-xs"
+                        >
+                          <Play className="h-3 w-3" />
+                          Start Working
+                        </Button>
+                      )
                     ) : (
                       <Button
                         variant="outline"

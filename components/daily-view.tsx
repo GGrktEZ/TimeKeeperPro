@@ -13,7 +13,7 @@ interface DailyViewProps {
   entries: DayEntry[]
   projects: Project[]
   onUpdateEntry: (data: Partial<DayEntry>) => void
-  onAddProject: (projectId: string) => void
+  onAddProject: (projectId: string, taskId?: string) => void
   onUpdateProject: (projectEntryId: string, data: Partial<DayProjectEntry>) => void
   onRemoveProject: (projectEntryId: string) => void
   onReorderProjects: (fromIndex: number, toIndex: number) => void

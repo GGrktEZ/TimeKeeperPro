@@ -54,6 +54,8 @@ export interface WorkSession {
   id: string
   start: string
   end: string
+  taskId?: string
+  taskName?: string
   doneNotes: string
   todoNotes: string
 }
