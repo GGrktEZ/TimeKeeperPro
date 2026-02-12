@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart"
 import {
@@ -10,10 +10,12 @@ import {
 import {
   Briefcase, Building2, CalendarDays, TrendingUp,
   Flame, Target, BarChart3, Zap, CalendarRange, Home,
+  ChevronLeft, ChevronRight,
 } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import {
   startOfWeek, endOfWeek, startOfMonth, endOfMonth, parseISO, isWithinInterval,
-  format, subDays, eachDayOfInterval, getDay, subWeeks,
+  format, subDays, eachDayOfInterval, getDay, subWeeks, addWeeks, isSameWeek,
 } from "date-fns"
 import type { DayEntry, Project, LocationBlock } from "@/lib/types"
 
@@ -324,57 +326,14 @@ export function StatsView({ entries, projects }: StatsViewProps) {
     const avgHomePerDay = allTime.daysWorked > 0 ? allTime.homeMin / allTime.daysWorked : 0
     const avgLunchPerDay = allTime.lunchMin > 0 && allTime.daysWorked > 0 ? allTime.lunchMin / allTime.daysWorked : 0
 
-    // --- This-week daily breakdown ---
-    const weekDays = eachDayOfInterval({ start: weekStart, end: weekEnd })
-    const thisWeekDaily = weekDays.map((d) => {
-      const key = format(d, "yyyy-MM-dd")
-      const data = dailyMap.get(key)
-      const mins = data ? data.work : 0
-      const isPast = d <= today
-      const isToday = format(d, "yyyy-MM-dd") === format(today, "yyyy-MM-dd")
-      return {
-        date: key,
-        label: format(d, "EEE"),
-        fullLabel: format(d, "EEEE"),
-        hours: Math.round((mins / 60) * 100) / 100,
-        minutes: mins,
-        isPast,
-        isToday,
-        isFuture: d > today,
-      }
-    })
-
-    // Quota calculation: 8h/day * 5 weekdays = 40h/week
-    const DAILY_QUOTA = 8 * 60 // 480 min
-    const WEEKLY_QUOTA = DAILY_QUOTA * 5 // 2400 min = 40h
-    const weekWorkMinTotal = thisWeekDaily.reduce((sum, d) => sum + d.minutes, 0)
-    // For need/day: only subtract completed past weekday hours (exclude today)
-    // Then divide by remaining weekdays including today
-    const completedWeekdayMins = thisWeekDaily
-      .filter((d) => d.isPast && !d.isToday && d.label !== "Sat" && d.label !== "Sun")
-      .reduce((sum, d) => sum + d.minutes, 0)
-    const remainingWeekdays = thisWeekDaily.filter((d) => {
-      const isWeekday = d.label !== "Sat" && d.label !== "Sun"
-      return isWeekday && (d.isFuture || d.isToday)
-    }).length
-    const hoursRemaining = Math.max(0, WEEKLY_QUOTA - completedWeekdayMins) / 60
-    const hoursPerRemainingDay = remainingWeekdays > 0 ? hoursRemaining / remainingWeekdays : 0
-    const weekAvgPerDay = week.days > 0 ? week.workMin / week.days : 0
-
     return {
       allTime, week, month,
       currentStreak, longestStreak,
-      dailyChartData, heatmapData,
+      dailyChartData, heatmapData, dailyMap,
       projectPieData, dayOfWeekAvg,
       avgClockIn, avgClockOut,
       bestDayDate, bestDayMins,
       avgWorkPerDay, avgOfficePerDay, avgHomePerDay, avgLunchPerDay,
-      thisWeekDaily,
-      weekWorkMinTotal,
-      hoursRemaining,
-      hoursPerRemainingDay,
-      weekAvgPerDay,
-      weeklyQuota: WEEKLY_QUOTA / 60,
       weeklyData: weeklyData.map(w => ({
         ...w,
         work: Math.round(w.work * 10) / 10,
@@ -390,6 +349,69 @@ export function StatsView({ entries, projects }: StatsViewProps) {
     const m = Math.round(mins % 60)
     return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`
   }
+
+  // --- Selected week state and computed stats ---
+  const [selectedWeekStart, setSelectedWeekStart] = useState(() =>
+    startOfWeek(today, { weekStartsOn: 1 })
+  )
+
+  const isCurrentWeek = isSameWeek(selectedWeekStart, today, { weekStartsOn: 1 })
+
+  const weekStats = useMemo(() => {
+    const wsStart = selectedWeekStart
+    const wsEnd = endOfWeek(wsStart, { weekStartsOn: 1 })
+    const weekDays = eachDayOfInterval({ start: wsStart, end: wsEnd })
+    const dailyMap = stats.dailyMap
+
+    const thisWeekDaily = weekDays.map((d) => {
+      const key = format(d, "yyyy-MM-dd")
+      const data = dailyMap.get(key)
+      const mins = data ? data.work : 0
+      const isPast = d <= today
+      const isDayToday = format(d, "yyyy-MM-dd") === format(today, "yyyy-MM-dd")
+      return {
+        date: key,
+        label: format(d, "EEE"),
+        fullLabel: format(d, "EEEE"),
+        hours: Math.round((mins / 60) * 100) / 100,
+        minutes: mins,
+        isPast,
+        isToday: isDayToday,
+        isFuture: d > today,
+      }
+    })
+
+    const DAILY_QUOTA = 8 * 60
+    const WEEKLY_QUOTA = DAILY_QUOTA * 5
+    const weekWorkMinTotal = thisWeekDaily.reduce((sum, d) => sum + d.minutes, 0)
+
+    // For need/day: only subtract completed past weekday hours (exclude today)
+    const completedWeekdayMins = thisWeekDaily
+      .filter((d) => d.isPast && !d.isToday && d.label !== "Sat" && d.label !== "Sun")
+      .reduce((sum, d) => sum + d.minutes, 0)
+    const remainingWeekdays = thisWeekDaily.filter((d) => {
+      const isWeekday = d.label !== "Sat" && d.label !== "Sun"
+      return isWeekday && (d.isFuture || d.isToday)
+    }).length
+    const hoursRemaining = Math.max(0, WEEKLY_QUOTA - completedWeekdayMins) / 60
+    const hoursPerRemainingDay = remainingWeekdays > 0 ? hoursRemaining / remainingWeekdays : 0
+
+    const daysWorked = thisWeekDaily.filter((d) => d.minutes > 0).length
+    const weekAvgPerDay = daysWorked > 0 ? weekWorkMinTotal / daysWorked : 0
+
+    return {
+      thisWeekDaily,
+      weekWorkMinTotal,
+      hoursRemaining,
+      hoursPerRemainingDay,
+      weekAvgPerDay,
+      daysWorked,
+      weeklyQuota: WEEKLY_QUOTA / 60,
+      isInPast: wsEnd < today,
+      startLabel: format(wsStart, "MMM d"),
+      endLabel: format(wsEnd, "MMM d, yyyy"),
+    }
+  }, [selectedWeekStart, stats.dailyMap, today])
 
   // Heatmap: group by week columns
   const heatmapWeeks = useMemo(() => {
@@ -566,15 +588,46 @@ export function StatsView({ entries, projects }: StatsViewProps) {
           </CardContent>
         </Card>
 
-        {/* This Week */}
+        {/* Weekly Stats */}
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Briefcase className="h-4 w-4 text-accent" />
-              This Week
-            </CardTitle>
+            <div className="flex items-center justify-between">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Briefcase className="h-4 w-4 text-accent" />
+                {isCurrentWeek ? "This Week" : "Week View"}
+              </CardTitle>
+              <div className="flex items-center gap-1">
+                {!isCurrentWeek && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 text-xs"
+                    onClick={() => setSelectedWeekStart(startOfWeek(today, { weekStartsOn: 1 }))}
+                  >
+                    This Week
+                  </Button>
+                )}
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={() => setSelectedWeekStart((prev) => subWeeks(prev, 1))}
+                >
+                  <ChevronLeft className="h-3.5 w-3.5" />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-7 w-7"
+                  disabled={isCurrentWeek}
+                  onClick={() => setSelectedWeekStart((prev) => addWeeks(prev, 1))}
+                >
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            </div>
             <CardDescription>
-              {format(startOfWeek(today, { weekStartsOn: 1 }), "MMM d")} &ndash; {format(endOfWeek(today, { weekStartsOn: 1 }), "MMM d, yyyy")}
+              {weekStats.startLabel} &ndash; {weekStats.endLabel}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -583,28 +636,40 @@ export function StatsView({ entries, projects }: StatsViewProps) {
               <div className="rounded-lg bg-secondary/30 p-3">
                 <p className="text-[11px] text-muted-foreground">Total</p>
                 <p className="text-lg font-bold tabular-nums text-accent">
-                  {mToStr(stats.weekWorkMinTotal)}
+                  {mToStr(weekStats.weekWorkMinTotal)}
                 </p>
                 <p className="text-[11px] tabular-nums text-muted-foreground">
-                  of {stats.weeklyQuota}h quota
+                  of {weekStats.weeklyQuota}h quota
                 </p>
               </div>
               <div className="rounded-lg bg-secondary/30 p-3">
                 <p className="text-[11px] text-muted-foreground">Avg / Day</p>
                 <p className="text-lg font-bold tabular-nums text-foreground">
-                  {mToStr(stats.weekAvgPerDay)}
+                  {mToStr(weekStats.weekAvgPerDay)}
                 </p>
                 <p className="text-[11px] tabular-nums text-muted-foreground">
-                  {stats.week.days} day{stats.week.days !== 1 ? "s" : ""} worked
+                  {weekStats.daysWorked} day{weekStats.daysWorked !== 1 ? "s" : ""} worked
                 </p>
               </div>
               <div className="rounded-lg bg-secondary/30 p-3">
-                <p className="text-[11px] text-muted-foreground">Need / Day</p>
-                <p className={`text-lg font-bold tabular-nums ${stats.hoursRemaining <= 0 ? "text-accent" : "text-amber-400"}`}>
-                  {stats.hoursRemaining <= 0 ? "Done!" : `${stats.hoursPerRemainingDay.toFixed(1)}h`}
+                <p className="text-[11px] text-muted-foreground">
+                  {weekStats.isInPast ? "Needed / Day" : "Need / Day"}
+                </p>
+                <p className={`text-lg font-bold tabular-nums ${
+                  weekStats.isInPast
+                    ? (weekStats.weekWorkMinTotal >= weekStats.weeklyQuota * 60 ? "text-accent" : "text-destructive")
+                    : weekStats.hoursRemaining <= 0 ? "text-accent" : "text-amber-400"
+                }`}>
+                  {weekStats.isInPast
+                    ? (weekStats.weekWorkMinTotal >= weekStats.weeklyQuota * 60 ? "Done!" : `${((weekStats.weeklyQuota * 60 - weekStats.weekWorkMinTotal) / 60).toFixed(1)}h short`)
+                    : weekStats.hoursRemaining <= 0 ? "Done!" : `${weekStats.hoursPerRemainingDay.toFixed(1)}h`
+                  }
                 </p>
                 <p className="text-[11px] tabular-nums text-muted-foreground">
-                  {stats.hoursRemaining <= 0 ? "Quota reached" : `${stats.hoursRemaining.toFixed(1)}h left`}
+                  {weekStats.isInPast
+                    ? (weekStats.weekWorkMinTotal >= weekStats.weeklyQuota * 60 ? "Quota reached" : "Quota missed")
+                    : weekStats.hoursRemaining <= 0 ? "Quota reached" : `${weekStats.hoursRemaining.toFixed(1)}h left`
+                  }
                 </p>
               </div>
             </div>
@@ -613,19 +678,19 @@ export function StatsView({ entries, projects }: StatsViewProps) {
             <div>
               <div className="flex items-center justify-between text-xs text-muted-foreground mb-1.5">
                 <span>Weekly progress</span>
-                <span className="tabular-nums">{Math.min(100, Math.round((stats.weekWorkMinTotal / (stats.weeklyQuota * 60)) * 100))}%</span>
+                <span className="tabular-nums">{Math.min(100, Math.round((weekStats.weekWorkMinTotal / (weekStats.weeklyQuota * 60)) * 100))}%</span>
               </div>
               <div className="h-2.5 w-full overflow-hidden rounded-full bg-secondary">
                 <div
                   className="h-full rounded-full bg-accent transition-all"
-                  style={{ width: `${Math.min(100, (stats.weekWorkMinTotal / (stats.weeklyQuota * 60)) * 100)}%` }}
+                  style={{ width: `${Math.min(100, (weekStats.weekWorkMinTotal / (weekStats.weeklyQuota * 60)) * 100)}%` }}
                 />
               </div>
             </div>
 
             {/* Day-by-day breakdown */}
             <div className="space-y-1.5">
-              {stats.thisWeekDaily.map((d) => {
+              {weekStats.thisWeekDaily.map((d) => {
                 const barPct = Math.min(100, (d.hours / 8) * 100)
                 const isWeekend = d.label === "Sat" || d.label === "Sun"
                 return (
@@ -640,7 +705,6 @@ export function StatsView({ entries, projects }: StatsViewProps) {
                           style={{ width: `${barPct}%` }}
                         />
                       )}
-                      {/* 8h marker line */}
                       {!isWeekend && (
                         <div className="absolute top-0 bottom-0 w-px bg-muted-foreground/30" style={{ left: "100%" }} />
                       )}
