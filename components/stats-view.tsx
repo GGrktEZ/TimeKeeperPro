@@ -324,6 +324,35 @@ export function StatsView({ entries, projects }: StatsViewProps) {
     const avgHomePerDay = allTime.daysWorked > 0 ? allTime.homeMin / allTime.daysWorked : 0
     const avgLunchPerDay = allTime.lunchMin > 0 && allTime.daysWorked > 0 ? allTime.lunchMin / allTime.daysWorked : 0
 
+    // --- This-week daily breakdown ---
+    const weekDays = eachDayOfInterval({ start: weekStart, end: weekEnd })
+    const thisWeekDaily = weekDays.map((d) => {
+      const key = format(d, "yyyy-MM-dd")
+      const data = dailyMap.get(key)
+      const mins = data ? data.work : 0
+      const isPast = d <= today
+      const isToday = format(d, "yyyy-MM-dd") === format(today, "yyyy-MM-dd")
+      return {
+        date: key,
+        label: format(d, "EEE"),
+        fullLabel: format(d, "EEEE"),
+        hours: Math.round((mins / 60) * 100) / 100,
+        minutes: mins,
+        isPast,
+        isToday,
+        isFuture: d > today,
+      }
+    })
+
+    // Quota calculation: 8h/day * 5 weekdays = 40h/week
+    const DAILY_QUOTA = 8 * 60 // 480 min
+    const WEEKLY_QUOTA = DAILY_QUOTA * 5 // 2400 min = 40h
+    const weekWorkMinTotal = thisWeekDaily.reduce((sum, d) => sum + d.minutes, 0)
+    const remainingDays = thisWeekDaily.filter((d) => d.isFuture || d.isToday).length
+    const hoursRemaining = Math.max(0, WEEKLY_QUOTA - weekWorkMinTotal) / 60
+    const hoursPerRemainingDay = remainingDays > 0 ? hoursRemaining / remainingDays : 0
+    const weekAvgPerDay = week.days > 0 ? week.workMin / week.days : 0
+
     return {
       allTime, week, month,
       currentStreak, longestStreak,
@@ -332,6 +361,12 @@ export function StatsView({ entries, projects }: StatsViewProps) {
       avgClockIn, avgClockOut,
       bestDayDate, bestDayMins,
       avgWorkPerDay, avgOfficePerDay, avgHomePerDay, avgLunchPerDay,
+      thisWeekDaily,
+      weekWorkMinTotal,
+      hoursRemaining,
+      hoursPerRemainingDay,
+      weekAvgPerDay,
+      weeklyQuota: WEEKLY_QUOTA / 60,
       weeklyData: weeklyData.map(w => ({
         ...w,
         work: Math.round(w.work * 10) / 10,
@@ -469,57 +504,157 @@ export function StatsView({ entries, projects }: StatsViewProps) {
         </Card>
       </div>
 
-      {/* Heatmap */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="flex items-center gap-2 text-base">
-            <CalendarDays className="h-4 w-4 text-accent" />
-            Activity Heatmap
-          </CardTitle>
-          <CardDescription>Work hours per day over the last 16 weeks</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="overflow-x-auto">
-            <div className="flex gap-0.5">
-              {/* Day labels */}
-              <div className="flex flex-col gap-0.5 pr-1">
-                {DAY_LABELS.map(label => (
-                  <div key={label} className="flex h-3.5 w-6 items-center text-[10px] text-muted-foreground">
-                    {label.charAt(0)}
+      {/* Heatmap + This Week side by side */}
+      <div className="grid gap-6 lg:grid-cols-2">
+        {/* Heatmap */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <CalendarDays className="h-4 w-4 text-accent" />
+              Activity Heatmap
+            </CardTitle>
+            <CardDescription>Work hours per day over the last 16 weeks</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="overflow-x-auto">
+              <div className="flex gap-0.5">
+                {/* Day labels */}
+                <div className="flex flex-col gap-0.5 pr-1">
+                  {DAY_LABELS.map(label => (
+                    <div key={label} className="flex h-3.5 w-6 items-center text-[10px] text-muted-foreground">
+                      {label.charAt(0)}
+                    </div>
+                  ))}
+                </div>
+                {/* Weeks */}
+                {heatmapWeeks.map((week, wi) => (
+                  <div key={wi} className="flex flex-col gap-0.5">
+                    {Array.from({ length: 7 }).map((_, dow) => {
+                      const day = week.find(d => d.dow === dow)
+                      if (!day) return <div key={dow} className="h-3.5 w-3.5" />
+                      return (
+                        <div
+                          key={dow}
+                          className={`h-3.5 w-3.5 rounded-[2px] ${getHeatmapColor(day.hours)}`}
+                          title={`${day.label}: ${day.hours.toFixed(1)}h`}
+                        />
+                      )
+                    })}
                   </div>
                 ))}
               </div>
-              {/* Weeks */}
-              {heatmapWeeks.map((week, wi) => (
-                <div key={wi} className="flex flex-col gap-0.5">
-                  {Array.from({ length: 7 }).map((_, dow) => {
-                    const day = week.find(d => d.dow === dow)
-                    if (!day) return <div key={dow} className="h-3.5 w-3.5" />
-                    return (
-                      <div
-                        key={dow}
-                        className={`h-3.5 w-3.5 rounded-[2px] ${getHeatmapColor(day.hours)}`}
-                        title={`${day.label}: ${day.hours.toFixed(1)}h`}
-                      />
-                    )
-                  })}
-                </div>
-              ))}
+              {/* Legend */}
+              <div className="mt-2 flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                <span>Less</span>
+                <div className="h-3 w-3 rounded-[2px] bg-secondary" />
+                <div className="h-3 w-3 rounded-[2px] bg-accent/20" />
+                <div className="h-3 w-3 rounded-[2px] bg-accent/40" />
+                <div className="h-3 w-3 rounded-[2px] bg-accent/60" />
+                <div className="h-3 w-3 rounded-[2px] bg-accent/80" />
+                <div className="h-3 w-3 rounded-[2px] bg-accent" />
+                <span>More</span>
+              </div>
             </div>
-            {/* Legend */}
-            <div className="mt-2 flex items-center gap-1.5 text-[10px] text-muted-foreground">
-              <span>Less</span>
-              <div className="h-3 w-3 rounded-[2px] bg-secondary" />
-              <div className="h-3 w-3 rounded-[2px] bg-accent/20" />
-              <div className="h-3 w-3 rounded-[2px] bg-accent/40" />
-              <div className="h-3 w-3 rounded-[2px] bg-accent/60" />
-              <div className="h-3 w-3 rounded-[2px] bg-accent/80" />
-              <div className="h-3 w-3 rounded-[2px] bg-accent" />
-              <span>More</span>
+          </CardContent>
+        </Card>
+
+        {/* This Week */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Briefcase className="h-4 w-4 text-accent" />
+              This Week
+            </CardTitle>
+            <CardDescription>
+              {format(startOfWeek(today, { weekStartsOn: 1 }), "MMM d")} &ndash; {format(endOfWeek(today, { weekStartsOn: 1 }), "MMM d, yyyy")}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {/* Summary row */}
+            <div className="grid grid-cols-3 gap-3">
+              <div className="rounded-lg bg-secondary/30 p-3">
+                <p className="text-[11px] text-muted-foreground">Total</p>
+                <p className="text-lg font-bold tabular-nums text-accent">
+                  {mToStr(stats.weekWorkMinTotal)}
+                </p>
+                <p className="text-[11px] tabular-nums text-muted-foreground">
+                  of {stats.weeklyQuota}h quota
+                </p>
+              </div>
+              <div className="rounded-lg bg-secondary/30 p-3">
+                <p className="text-[11px] text-muted-foreground">Avg / Day</p>
+                <p className="text-lg font-bold tabular-nums text-foreground">
+                  {mToStr(stats.weekAvgPerDay)}
+                </p>
+                <p className="text-[11px] tabular-nums text-muted-foreground">
+                  {stats.week.days} day{stats.week.days !== 1 ? "s" : ""} worked
+                </p>
+              </div>
+              <div className="rounded-lg bg-secondary/30 p-3">
+                <p className="text-[11px] text-muted-foreground">Need / Day</p>
+                <p className={`text-lg font-bold tabular-nums ${stats.hoursRemaining <= 0 ? "text-accent" : "text-amber-400"}`}>
+                  {stats.hoursRemaining <= 0 ? "Done!" : `${stats.hoursPerRemainingDay.toFixed(1)}h`}
+                </p>
+                <p className="text-[11px] tabular-nums text-muted-foreground">
+                  {stats.hoursRemaining <= 0 ? "Quota reached" : `${stats.hoursRemaining.toFixed(1)}h left`}
+                </p>
+              </div>
             </div>
-          </div>
-        </CardContent>
-      </Card>
+
+            {/* Progress bar */}
+            <div>
+              <div className="flex items-center justify-between text-xs text-muted-foreground mb-1.5">
+                <span>Weekly progress</span>
+                <span className="tabular-nums">{Math.min(100, Math.round((stats.weekWorkMinTotal / (stats.weeklyQuota * 60)) * 100))}%</span>
+              </div>
+              <div className="h-2.5 w-full overflow-hidden rounded-full bg-secondary">
+                <div
+                  className="h-full rounded-full bg-accent transition-all"
+                  style={{ width: `${Math.min(100, (stats.weekWorkMinTotal / (stats.weeklyQuota * 60)) * 100)}%` }}
+                />
+              </div>
+            </div>
+
+            {/* Day-by-day breakdown */}
+            <div className="space-y-1.5">
+              {stats.thisWeekDaily.map((d) => {
+                const barPct = Math.min(100, (d.hours / 8) * 100)
+                const isWeekend = d.label === "Sat" || d.label === "Sun"
+                return (
+                  <div key={d.date} className="flex items-center gap-3">
+                    <span className={`w-9 text-xs shrink-0 ${d.isToday ? "font-bold text-accent" : d.isFuture ? "text-muted-foreground/50" : "text-muted-foreground"}`}>
+                      {d.label}
+                    </span>
+                    <div className="flex-1 h-5 rounded bg-secondary/40 overflow-hidden relative">
+                      {d.hours > 0 && (
+                        <div
+                          className={`h-full rounded transition-all ${d.isToday ? "bg-accent" : "bg-accent/60"}`}
+                          style={{ width: `${barPct}%` }}
+                        />
+                      )}
+                      {/* 8h marker line */}
+                      {!isWeekend && (
+                        <div className="absolute top-0 bottom-0 w-px bg-muted-foreground/30" style={{ left: "100%" }} />
+                      )}
+                    </div>
+                    <span className={`w-12 text-right text-xs tabular-nums shrink-0 ${
+                      d.hours === 0 && d.isPast && !d.isToday && !isWeekend
+                        ? "text-muted-foreground/40"
+                        : d.isToday
+                          ? "font-medium text-accent"
+                          : d.isFuture
+                            ? "text-muted-foreground/40"
+                            : "text-foreground"
+                    }`}>
+                      {d.hours > 0 ? `${d.hours.toFixed(1)}h` : d.isFuture ? "--" : "0h"}
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
 
       {/* Charts row */}
       <div className="grid gap-6 lg:grid-cols-2">
