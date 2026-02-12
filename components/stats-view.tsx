@@ -348,9 +348,13 @@ export function StatsView({ entries, projects }: StatsViewProps) {
     const DAILY_QUOTA = 8 * 60 // 480 min
     const WEEKLY_QUOTA = DAILY_QUOTA * 5 // 2400 min = 40h
     const weekWorkMinTotal = thisWeekDaily.reduce((sum, d) => sum + d.minutes, 0)
-    const remainingDays = thisWeekDaily.filter((d) => d.isFuture || d.isToday).length
+    // Only count remaining weekdays (Mon-Fri) for needed-per-day calc
+    const remainingWeekdays = thisWeekDaily.filter((d) => {
+      const isWeekday = d.label !== "Sat" && d.label !== "Sun"
+      return isWeekday && (d.isFuture || d.isToday)
+    }).length
     const hoursRemaining = Math.max(0, WEEKLY_QUOTA - weekWorkMinTotal) / 60
-    const hoursPerRemainingDay = remainingDays > 0 ? hoursRemaining / remainingDays : 0
+    const hoursPerRemainingDay = remainingWeekdays > 0 ? hoursRemaining / remainingWeekdays : 0
     const weekAvgPerDay = week.days > 0 ? week.workMin / week.days : 0
 
     return {
