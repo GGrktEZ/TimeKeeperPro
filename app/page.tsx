@@ -6,6 +6,7 @@ import { Header } from "@/components/header"
 import { DailyView } from "@/components/daily-view"
 import { ProjectsView } from "@/components/projects-view"
 import { StatsView } from "@/components/stats-view"
+import { DataView } from "@/components/data-view"
 import { UndoBar } from "@/components/undo-bar"
 import { useProjects, useDayEntries } from "@/lib/store"
 import { useUndo } from "@/lib/use-undo"
@@ -195,11 +196,6 @@ export default function HomePage() {
       <Header
         currentView={currentView}
         onViewChange={setCurrentView}
-        selectedDate={selectedDate}
-        entries={entries}
-        projects={projects}
-        currentEntry={currentEntry}
-        onImport={handleImport}
       />
       
       <main className="mx-auto max-w-7xl px-4 py-6">
@@ -221,12 +217,21 @@ export default function HomePage() {
             projects={projects}
             entries={entries}
             onAddProject={handleAddProject}
-            onImportProjects={importProjects}
             onUpdateProject={handleUpdateProject}
             onDeleteProject={handleDeleteProject}
           />
-        ) : (
+        ) : currentView === "stats" ? (
           <StatsView entries={entries} projects={projects} />
+        ) : (
+          <DataView
+            selectedDate={selectedDate}
+            entries={entries}
+            projects={projects}
+            currentEntry={currentEntry}
+            onImport={handleImport}
+            onImportProjects={importProjects}
+            onUpdateProject={handleUpdateProject}
+          />
         )}
       </main>
 

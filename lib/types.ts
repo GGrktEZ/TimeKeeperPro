@@ -98,4 +98,4 @@ export interface DayEntry {
   updatedAt: string
 }
 
-export type View = 'daily' | 'projects' | 'stats'
+export type View = 'daily' | 'projects' | 'stats' | 'data'

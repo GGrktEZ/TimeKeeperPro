@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { ProjectForm } from "./project-form"
 import { ProjectCard } from "./project-card"
-import { DynamicsSync } from "./dynamics-sync"
+
 import type { Project, DayEntry } from "@/lib/types"
 import { isAfter, parseISO } from "date-fns"
 
@@ -23,7 +23,6 @@ interface ProjectsViewProps {
   projects: Project[]
   entries: DayEntry[]
   onAddProject: (data: Omit<Project, "id" | "color" | "createdAt" | "updatedAt">) => void
-  onImportProjects: (projects: Omit<Project, "id" | "color" | "createdAt" | "updatedAt">[]) => void
   onUpdateProject: (id: string, data: Partial<Project>) => void
   onDeleteProject: (id: string) => void
 }
@@ -32,7 +31,6 @@ export function ProjectsView({
   projects,
   entries,
   onAddProject,
-  onImportProjects,
   onUpdateProject,
   onDeleteProject,
 }: ProjectsViewProps) {
@@ -104,11 +102,7 @@ export function ProjectsView({
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <DynamicsSync
-            projects={projects}
-            onImportProjects={onImportProjects}
-            onUpdateProject={onUpdateProject}
-          />
+
           <ProjectForm onSubmit={onAddProject} />
         </div>
       </div>
