@@ -10,7 +10,7 @@ import {
 import {
   Briefcase, Building2, CalendarDays, TrendingUp,
   Flame, Target, BarChart3, Zap, CalendarRange, Home,
-  ChevronLeft, ChevronRight,
+  ChevronLeft, ChevronRight, Download,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -18,6 +18,13 @@ import {
   format, subDays, eachDayOfInterval, getDay, subWeeks, addWeeks, isSameWeek,
 } from "date-fns"
 import type { DayEntry, Project, LocationBlock } from "@/lib/types"
+import { buildExportRows, exportToExcel } from "@/lib/export-excel"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 
 interface StatsViewProps {
   entries: DayEntry[]
@@ -356,6 +363,37 @@ export function StatsView({ entries, projects }: StatsViewProps) {
   )
 
   const isCurrentWeek = isSameWeek(selectedWeekStart, today, { weekStartsOn: 1 })
+  const [isExporting, setIsExporting] = useState(false)
+
+  const handleExportWeek = async () => {
+    setIsExporting(true)
+    try {
+      const wsStart = selectedWeekStart
+      const wsEnd = endOfWeek(wsStart, { weekStartsOn: 1 })
+      const weekDays = eachDayOfInterval({ start: wsStart, end: wsEnd })
+      const weekDates = weekDays.map((d) => format(d, "yyyy-MM-dd"))
+
+      const rows = buildExportRows({
+        entries,
+        projects,
+        weekDates,
+        createdBy: "",
+        role: "",
+      })
+
+      if (rows.length === 0) {
+        setIsExporting(false)
+        return
+      }
+
+      const weekLabel = format(wsStart, "yyyy-MM-dd")
+      await exportToExcel(rows, `time-entries-${weekLabel}.xlsx`)
+    } catch (err) {
+      console.error("Export failed:", err)
+    } finally {
+      setIsExporting(false)
+    }
+  }
 
   const weekStats = useMemo(() => {
     const wsStart = selectedWeekStart
@@ -608,6 +646,24 @@ export function StatsView({ entries, projects }: StatsViewProps) {
                 {isCurrentWeek ? "This Week" : "Week View"}
               </CardTitle>
               <div className="flex items-center gap-1">
+                <TooltipProvider delayDuration={300}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        className="h-7 w-7"
+                        disabled={isExporting || weekStats.weekWorkMinTotal === 0}
+                        onClick={handleExportWeek}
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">
+                      <p>Export week to Excel (CRM format)</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
                 {!isCurrentWeek && (
                   <Button
                     variant="ghost"
