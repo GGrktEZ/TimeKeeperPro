@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart"
 import {
@@ -10,10 +10,12 @@ import {
 import {
   Briefcase, Building2, CalendarDays, TrendingUp,
   Flame, Target, BarChart3, Zap, CalendarRange, Home,
+  ChevronLeft, ChevronRight,
 } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import {
   startOfWeek, endOfWeek, startOfMonth, endOfMonth, parseISO, isWithinInterval,
-  format, subDays, eachDayOfInterval, getDay, subWeeks,
+  format, subDays, eachDayOfInterval, getDay, subWeeks, addWeeks, isSameWeek,
 } from "date-fns"
 import type { DayEntry, Project, LocationBlock } from "@/lib/types"
 
@@ -327,7 +329,7 @@ export function StatsView({ entries, projects }: StatsViewProps) {
     return {
       allTime, week, month,
       currentStreak, longestStreak,
-      dailyChartData, heatmapData,
+      dailyChartData, heatmapData, dailyMap,
       projectPieData, dayOfWeekAvg,
       avgClockIn, avgClockOut,
       bestDayDate, bestDayMins,
@@ -347,6 +349,80 @@ export function StatsView({ entries, projects }: StatsViewProps) {
     const m = Math.round(mins % 60)
     return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`
   }
+
+  // --- Selected week state and computed stats ---
+  const [selectedWeekStart, setSelectedWeekStart] = useState(() =>
+    startOfWeek(today, { weekStartsOn: 1 })
+  )
+
+  const isCurrentWeek = isSameWeek(selectedWeekStart, today, { weekStartsOn: 1 })
+
+  const weekStats = useMemo(() => {
+    const wsStart = selectedWeekStart
+    const wsEnd = endOfWeek(wsStart, { weekStartsOn: 1 })
+    const weekDays = eachDayOfInterval({ start: wsStart, end: wsEnd })
+    const dailyMap = stats.dailyMap
+
+    const thisWeekDaily = weekDays.map((d) => {
+      const key = format(d, "yyyy-MM-dd")
+      const data = dailyMap.get(key)
+      const mins = data ? data.work : 0
+      const isPast = d <= today
+      const isDayToday = format(d, "yyyy-MM-dd") === format(today, "yyyy-MM-dd")
+      return {
+        date: key,
+        label: format(d, "EEE"),
+        fullLabel: format(d, "EEEE"),
+        hours: Math.round((mins / 60) * 100) / 100,
+        minutes: mins,
+        isPast,
+        isToday: isDayToday,
+        isFuture: d > today,
+      }
+    })
+
+    const weekWorkMinTotal = thisWeekDaily.reduce((sum, d) => sum + d.minutes, 0)
+
+    // Detect if this is a 3-day (Mon-Wed) or 5-day (Mon-Fri) week.
+    // Default: Mon-Wed. If any time recorded on Thu or Fri, it's Mon-Fri.
+    const thuFriHaveWork = thisWeekDaily.some(
+      (d) => (d.label === "Thu" || d.label === "Fri") && d.minutes > 0
+    )
+    const workDayCount = thuFriHaveWork ? 5 : 3
+    const workDayLabels = thuFriHaveWork
+      ? ["Mon", "Tue", "Wed", "Thu", "Fri"]
+      : ["Mon", "Tue", "Wed"]
+
+    const DAILY_QUOTA = 8 * 60
+    const WEEKLY_QUOTA = DAILY_QUOTA * workDayCount
+
+    // For need/day: only subtract completed past work-day hours (exclude today)
+    const completedWorkdayMins = thisWeekDaily
+      .filter((d) => d.isPast && !d.isToday && workDayLabels.includes(d.label))
+      .reduce((sum, d) => sum + d.minutes, 0)
+    const remainingWorkdays = thisWeekDaily.filter((d) => {
+      return workDayLabels.includes(d.label) && (d.isFuture || d.isToday)
+    }).length
+    const hoursRemaining = Math.max(0, WEEKLY_QUOTA - completedWorkdayMins) / 60
+    const hoursPerRemainingDay = remainingWorkdays > 0 ? hoursRemaining / remainingWorkdays : 0
+
+    const daysWorked = thisWeekDaily.filter((d) => d.minutes > 0).length
+    const weekAvgPerDay = daysWorked > 0 ? weekWorkMinTotal / daysWorked : 0
+
+    return {
+      thisWeekDaily,
+      weekWorkMinTotal,
+      hoursRemaining,
+      hoursPerRemainingDay,
+      weekAvgPerDay,
+      daysWorked,
+      workDayCount,
+      weeklyQuota: WEEKLY_QUOTA / 60,
+      isInPast: wsEnd < today,
+      startLabel: format(wsStart, "MMM d"),
+      endLabel: format(wsEnd, "MMM d, yyyy"),
+    }
+  }, [selectedWeekStart, stats.dailyMap, today])
 
   // Heatmap: group by week columns
   const heatmapWeeks = useMemo(() => {
@@ -469,57 +545,202 @@ export function StatsView({ entries, projects }: StatsViewProps) {
         </Card>
       </div>
 
-      {/* Heatmap */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="flex items-center gap-2 text-base">
-            <CalendarDays className="h-4 w-4 text-accent" />
-            Activity Heatmap
-          </CardTitle>
-          <CardDescription>Work hours per day over the last 16 weeks</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="overflow-x-auto">
-            <div className="flex gap-0.5">
-              {/* Day labels */}
-              <div className="flex flex-col gap-0.5 pr-1">
-                {DAY_LABELS.map(label => (
-                  <div key={label} className="flex h-3.5 w-6 items-center text-[10px] text-muted-foreground">
-                    {label.charAt(0)}
+      {/* Heatmap + This Week side by side */}
+      <div className="grid gap-6 lg:grid-cols-2">
+        {/* Heatmap */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <CalendarDays className="h-4 w-4 text-accent" />
+              Activity Heatmap
+            </CardTitle>
+            <CardDescription>Work hours per day over the last 16 weeks</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="overflow-x-auto">
+              <div className="flex gap-0.5">
+                {/* Day labels */}
+                <div className="flex flex-col gap-0.5 pr-1">
+                  {DAY_LABELS.map(label => (
+                    <div key={label} className="flex h-3.5 w-6 items-center text-[10px] text-muted-foreground">
+                      {label.charAt(0)}
+                    </div>
+                  ))}
+                </div>
+                {/* Weeks */}
+                {heatmapWeeks.map((week, wi) => (
+                  <div key={wi} className="flex flex-col gap-0.5">
+                    {Array.from({ length: 7 }).map((_, dow) => {
+                      const day = week.find(d => d.dow === dow)
+                      if (!day) return <div key={dow} className="h-3.5 w-3.5" />
+                      return (
+                        <div
+                          key={dow}
+                          className={`h-3.5 w-3.5 rounded-[2px] ${getHeatmapColor(day.hours)}`}
+                          title={`${day.label}: ${day.hours.toFixed(1)}h`}
+                        />
+                      )
+                    })}
                   </div>
                 ))}
               </div>
-              {/* Weeks */}
-              {heatmapWeeks.map((week, wi) => (
-                <div key={wi} className="flex flex-col gap-0.5">
-                  {Array.from({ length: 7 }).map((_, dow) => {
-                    const day = week.find(d => d.dow === dow)
-                    if (!day) return <div key={dow} className="h-3.5 w-3.5" />
-                    return (
-                      <div
-                        key={dow}
-                        className={`h-3.5 w-3.5 rounded-[2px] ${getHeatmapColor(day.hours)}`}
-                        title={`${day.label}: ${day.hours.toFixed(1)}h`}
-                      />
-                    )
-                  })}
-                </div>
-              ))}
+              {/* Legend */}
+              <div className="mt-2 flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                <span>Less</span>
+                <div className="h-3 w-3 rounded-[2px] bg-secondary" />
+                <div className="h-3 w-3 rounded-[2px] bg-accent/20" />
+                <div className="h-3 w-3 rounded-[2px] bg-accent/40" />
+                <div className="h-3 w-3 rounded-[2px] bg-accent/60" />
+                <div className="h-3 w-3 rounded-[2px] bg-accent/80" />
+                <div className="h-3 w-3 rounded-[2px] bg-accent" />
+                <span>More</span>
+              </div>
             </div>
-            {/* Legend */}
-            <div className="mt-2 flex items-center gap-1.5 text-[10px] text-muted-foreground">
-              <span>Less</span>
-              <div className="h-3 w-3 rounded-[2px] bg-secondary" />
-              <div className="h-3 w-3 rounded-[2px] bg-accent/20" />
-              <div className="h-3 w-3 rounded-[2px] bg-accent/40" />
-              <div className="h-3 w-3 rounded-[2px] bg-accent/60" />
-              <div className="h-3 w-3 rounded-[2px] bg-accent/80" />
-              <div className="h-3 w-3 rounded-[2px] bg-accent" />
-              <span>More</span>
+          </CardContent>
+        </Card>
+
+        {/* Weekly Stats */}
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Briefcase className="h-4 w-4 text-accent" />
+                {isCurrentWeek ? "This Week" : "Week View"}
+              </CardTitle>
+              <div className="flex items-center gap-1">
+                {!isCurrentWeek && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 text-xs"
+                    onClick={() => setSelectedWeekStart(startOfWeek(today, { weekStartsOn: 1 }))}
+                  >
+                    This Week
+                  </Button>
+                )}
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={() => setSelectedWeekStart((prev) => subWeeks(prev, 1))}
+                >
+                  <ChevronLeft className="h-3.5 w-3.5" />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-7 w-7"
+                  disabled={isCurrentWeek}
+                  onClick={() => setSelectedWeekStart((prev) => addWeeks(prev, 1))}
+                >
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </Button>
+              </div>
             </div>
-          </div>
-        </CardContent>
-      </Card>
+            <CardDescription className="flex items-center gap-2">
+              <span>{weekStats.startLabel} &ndash; {weekStats.endLabel}</span>
+              <span className="rounded bg-secondary px-1.5 py-0.5 text-[10px] font-medium">
+                {weekStats.workDayCount === 5 ? "Mon-Fri" : "Mon-Wed"}
+              </span>
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {/* Summary row */}
+            <div className="grid grid-cols-3 gap-3">
+              <div className="rounded-lg bg-secondary/30 p-3">
+                <p className="text-[11px] text-muted-foreground">Total</p>
+                <p className="text-lg font-bold tabular-nums text-accent">
+                  {mToStr(weekStats.weekWorkMinTotal)}
+                </p>
+                <p className="text-[11px] tabular-nums text-muted-foreground">
+                  of {weekStats.weeklyQuota}h quota
+                </p>
+              </div>
+              <div className="rounded-lg bg-secondary/30 p-3">
+                <p className="text-[11px] text-muted-foreground">Avg / Day</p>
+                <p className="text-lg font-bold tabular-nums text-foreground">
+                  {mToStr(weekStats.weekAvgPerDay)}
+                </p>
+                <p className="text-[11px] tabular-nums text-muted-foreground">
+                  {weekStats.daysWorked} day{weekStats.daysWorked !== 1 ? "s" : ""} worked
+                </p>
+              </div>
+              <div className="rounded-lg bg-secondary/30 p-3">
+                <p className="text-[11px] text-muted-foreground">
+                  {weekStats.isInPast ? "Needed / Day" : "Need / Day"}
+                </p>
+                <p className={`text-lg font-bold tabular-nums ${
+                  weekStats.isInPast
+                    ? (weekStats.weekWorkMinTotal >= weekStats.weeklyQuota * 60 ? "text-accent" : "text-destructive")
+                    : weekStats.hoursRemaining <= 0 ? "text-accent" : "text-amber-400"
+                }`}>
+                  {weekStats.isInPast
+                    ? (weekStats.weekWorkMinTotal >= weekStats.weeklyQuota * 60 ? "Done!" : `${((weekStats.weeklyQuota * 60 - weekStats.weekWorkMinTotal) / 60).toFixed(1)}h short`)
+                    : weekStats.hoursRemaining <= 0 ? "Done!" : `${weekStats.hoursPerRemainingDay.toFixed(1)}h`
+                  }
+                </p>
+                <p className="text-[11px] tabular-nums text-muted-foreground">
+                  {weekStats.isInPast
+                    ? (weekStats.weekWorkMinTotal >= weekStats.weeklyQuota * 60 ? "Quota reached" : "Quota missed")
+                    : weekStats.hoursRemaining <= 0 ? "Quota reached" : `${weekStats.hoursRemaining.toFixed(1)}h left`
+                  }
+                </p>
+              </div>
+            </div>
+
+            {/* Progress bar */}
+            <div>
+              <div className="flex items-center justify-between text-xs text-muted-foreground mb-1.5">
+                <span>Weekly progress</span>
+                <span className="tabular-nums">{Math.min(100, Math.round((weekStats.weekWorkMinTotal / (weekStats.weeklyQuota * 60)) * 100))}%</span>
+              </div>
+              <div className="h-2.5 w-full overflow-hidden rounded-full bg-secondary">
+                <div
+                  className="h-full rounded-full bg-accent transition-all"
+                  style={{ width: `${Math.min(100, (weekStats.weekWorkMinTotal / (weekStats.weeklyQuota * 60)) * 100)}%` }}
+                />
+              </div>
+            </div>
+
+            {/* Day-by-day breakdown */}
+            <div className="space-y-1.5">
+              {weekStats.thisWeekDaily.map((d) => {
+                const barPct = Math.min(100, (d.hours / 8) * 100)
+                const isWeekend = d.label === "Sat" || d.label === "Sun"
+                return (
+                  <div key={d.date} className="flex items-center gap-3">
+                    <span className={`w-9 text-xs shrink-0 ${d.isToday ? "font-bold text-accent" : d.isFuture ? "text-muted-foreground/50" : "text-muted-foreground"}`}>
+                      {d.label}
+                    </span>
+                    <div className="flex-1 h-5 rounded bg-secondary/40 overflow-hidden relative">
+                      {d.hours > 0 && (
+                        <div
+                          className={`h-full rounded transition-all ${d.isToday ? "bg-accent" : "bg-accent/60"}`}
+                          style={{ width: `${barPct}%` }}
+                        />
+                      )}
+                      {!isWeekend && (
+                        <div className="absolute top-0 bottom-0 w-px bg-muted-foreground/30" style={{ left: "100%" }} />
+                      )}
+                    </div>
+                    <span className={`w-12 text-right text-xs tabular-nums shrink-0 ${
+                      d.hours === 0 && d.isPast && !d.isToday && !isWeekend
+                        ? "text-muted-foreground/40"
+                        : d.isToday
+                          ? "font-medium text-accent"
+                          : d.isFuture
+                            ? "text-muted-foreground/40"
+                            : "text-foreground"
+                    }`}>
+                      {d.hours > 0 ? `${d.hours.toFixed(1)}h` : d.isFuture ? "--" : "0h"}
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
 
       {/* Charts row */}
       <div className="grid gap-6 lg:grid-cols-2">
