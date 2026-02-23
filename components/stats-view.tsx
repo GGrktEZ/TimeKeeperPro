@@ -381,20 +381,30 @@ export function StatsView({ entries, projects }: StatsViewProps) {
       }
     })
 
-    const DAILY_QUOTA = 8 * 60
-    const WEEKLY_QUOTA = DAILY_QUOTA * 5
     const weekWorkMinTotal = thisWeekDaily.reduce((sum, d) => sum + d.minutes, 0)
 
-    // For need/day: only subtract completed past weekday hours (exclude today)
-    const completedWeekdayMins = thisWeekDaily
-      .filter((d) => d.isPast && !d.isToday && d.label !== "Sat" && d.label !== "Sun")
+    // Detect if this is a 3-day (Mon-Wed) or 5-day (Mon-Fri) week.
+    // Default: Mon-Wed. If any time recorded on Thu or Fri, it's Mon-Fri.
+    const thuFriHaveWork = thisWeekDaily.some(
+      (d) => (d.label === "Thu" || d.label === "Fri") && d.minutes > 0
+    )
+    const workDayCount = thuFriHaveWork ? 5 : 3
+    const workDayLabels = thuFriHaveWork
+      ? ["Mon", "Tue", "Wed", "Thu", "Fri"]
+      : ["Mon", "Tue", "Wed"]
+
+    const DAILY_QUOTA = 8 * 60
+    const WEEKLY_QUOTA = DAILY_QUOTA * workDayCount
+
+    // For need/day: only subtract completed past work-day hours (exclude today)
+    const completedWorkdayMins = thisWeekDaily
+      .filter((d) => d.isPast && !d.isToday && workDayLabels.includes(d.label))
       .reduce((sum, d) => sum + d.minutes, 0)
-    const remainingWeekdays = thisWeekDaily.filter((d) => {
-      const isWeekday = d.label !== "Sat" && d.label !== "Sun"
-      return isWeekday && (d.isFuture || d.isToday)
+    const remainingWorkdays = thisWeekDaily.filter((d) => {
+      return workDayLabels.includes(d.label) && (d.isFuture || d.isToday)
     }).length
-    const hoursRemaining = Math.max(0, WEEKLY_QUOTA - completedWeekdayMins) / 60
-    const hoursPerRemainingDay = remainingWeekdays > 0 ? hoursRemaining / remainingWeekdays : 0
+    const hoursRemaining = Math.max(0, WEEKLY_QUOTA - completedWorkdayMins) / 60
+    const hoursPerRemainingDay = remainingWorkdays > 0 ? hoursRemaining / remainingWorkdays : 0
 
     const daysWorked = thisWeekDaily.filter((d) => d.minutes > 0).length
     const weekAvgPerDay = daysWorked > 0 ? weekWorkMinTotal / daysWorked : 0
@@ -406,6 +416,7 @@ export function StatsView({ entries, projects }: StatsViewProps) {
       hoursPerRemainingDay,
       weekAvgPerDay,
       daysWorked,
+      workDayCount,
       weeklyQuota: WEEKLY_QUOTA / 60,
       isInPast: wsEnd < today,
       startLabel: format(wsStart, "MMM d"),
@@ -626,8 +637,11 @@ export function StatsView({ entries, projects }: StatsViewProps) {
                 </Button>
               </div>
             </div>
-            <CardDescription>
-              {weekStats.startLabel} &ndash; {weekStats.endLabel}
+            <CardDescription className="flex items-center gap-2">
+              <span>{weekStats.startLabel} &ndash; {weekStats.endLabel}</span>
+              <span className="rounded bg-secondary px-1.5 py-0.5 text-[10px] font-medium">
+                {weekStats.workDayCount === 5 ? "Mon-Fri" : "Mon-Wed"}
+              </span>
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
