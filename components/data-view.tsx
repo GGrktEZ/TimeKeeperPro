@@ -24,7 +24,7 @@ import { Input } from "@/components/ui/input"
 import { DynamicsSync } from "./dynamics-sync"
 import type { Project, DayEntry } from "@/lib/types"
 import { exportDay, exportMonth, exportAll, downloadJson, type ExportedData } from "@/lib/export"
-import { buildExportRows, exportToExcel } from "@/lib/export-excel"
+import { buildExportRows, exportToExcelWithTemplate, exportToExcelFresh } from "@/lib/export-excel"
 
 interface DataViewProps {
   selectedDate: string
@@ -50,6 +50,8 @@ export function DataView({
     message: string
   }>({ type: null, message: "" })
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const templateInputRef = useRef<HTMLInputElement>(null)
+  const [templateFile, setTemplateFile] = useState<File | null>(null)
   const [isExporting, setIsExporting] = useState(false)
   const today = useMemo(() => new Date(), [])
   const [selectedWeekStart, setSelectedWeekStart] = useState(() =>
@@ -166,6 +168,17 @@ export function DataView({
     }
   }
 
+  // Template file handling
+  const handleTemplateSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) setTemplateFile(file)
+  }
+
+  const removeTemplate = () => {
+    setTemplateFile(null)
+    if (templateInputRef.current) templateInputRef.current.value = ""
+  }
+
   // Excel export for Dynamics
   const handleExcelExport = async () => {
     setIsExporting(true)
@@ -189,7 +202,13 @@ export function DataView({
       }
 
       const weekLabel = format(wsStart, "yyyy-MM-dd")
-      await exportToExcel(rows, `time-entries-${weekLabel}.xlsx`)
+      const filename = `time-entries-${weekLabel}.xlsx`
+
+      if (templateFile) {
+        await exportToExcelWithTemplate(templateFile, rows, filename)
+      } else {
+        await exportToExcelFresh(rows, filename)
+      }
     } catch (err) {
       console.error("Export failed:", err)
     } finally {
@@ -373,9 +392,41 @@ export function DataView({
             <div className="space-y-2">
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Export Time Entries</p>
               <div className="rounded-lg border border-border bg-secondary/50 p-3 space-y-3">
-                <p className="text-xs text-muted-foreground">
-                  Export weekly time entries as an Excel file matching the Dynamics 365 CRM import format.
-                </p>
+                {/* Template file */}
+                <div className="space-y-1.5">
+                  <p className="text-xs font-medium text-foreground">CRM Template</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    Upload an Excel file exported from Dynamics 365 to use as a template. This preserves the hidden metadata sheets that Dynamics requires for import.
+                  </p>
+                  {templateFile ? (
+                    <div className="flex items-center gap-2 rounded-md bg-accent/10 px-2.5 py-2 text-xs">
+                      <FileSpreadsheet className="h-3.5 w-3.5 shrink-0 text-accent" />
+                      <span className="flex-1 truncate font-medium text-foreground">{templateFile.name}</span>
+                      <button
+                        type="button"
+                        onClick={removeTemplate}
+                        className="shrink-0 text-muted-foreground hover:text-foreground"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ) : (
+                    <Input
+                      ref={templateInputRef}
+                      type="file"
+                      accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                      onChange={handleTemplateSelect}
+                      className="cursor-pointer text-xs file:mr-3 file:cursor-pointer file:rounded-md file:border-0 file:bg-accent file:px-3 file:py-1 file:text-xs file:font-medium file:text-accent-foreground"
+                    />
+                  )}
+                  {!templateFile && (
+                    <p className="text-[11px] text-amber-400">
+                      Without a template, the export will be a plain spreadsheet that cannot be imported into Dynamics 365.
+                    </p>
+                  )}
+                </div>
+
+                <div className="h-px bg-border" />
 
                 {/* Week selector */}
                 <div className="flex items-center justify-between">
