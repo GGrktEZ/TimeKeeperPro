@@ -1,10 +1,9 @@
 "use client"
 
-import React, { useState, useRef, useMemo } from "react"
-import { format, parseISO, startOfWeek, endOfWeek, eachDayOfInterval, subWeeks, addWeeks, isSameWeek } from "date-fns"
+import React, { useState, useRef } from "react"
+import { format, parseISO } from "date-fns"
 import {
   Download,
-  Upload,
   FileJson,
   Calendar,
   CalendarRange,
@@ -13,9 +12,6 @@ import {
   AlertCircle,
   X,
   Globe,
-  FileSpreadsheet,
-  ChevronLeft,
-  ChevronRight,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -24,7 +20,7 @@ import { Input } from "@/components/ui/input"
 import { DynamicsSync } from "./dynamics-sync"
 import type { Project, DayEntry } from "@/lib/types"
 import { exportDay, exportMonth, exportAll, downloadJson, type ExportedData } from "@/lib/export"
-import { buildExportRows, exportToExcelWithTemplate, exportToExcelFresh } from "@/lib/export-excel"
+
 
 interface DataViewProps {
   selectedDate: string
@@ -50,14 +46,6 @@ export function DataView({
     message: string
   }>({ type: null, message: "" })
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const templateInputRef = useRef<HTMLInputElement>(null)
-  const [templateFile, setTemplateFile] = useState<File | null>(null)
-  const [isExporting, setIsExporting] = useState(false)
-  const today = useMemo(() => new Date(), [])
-  const [selectedWeekStart, setSelectedWeekStart] = useState(() =>
-    startOfWeek(today, { weekStartsOn: 1 })
-  )
-  const isCurrentWeek = isSameWeek(selectedWeekStart, today, { weekStartsOn: 1 })
 
   // JSON exports
   const handleExportDay = () => {
@@ -168,71 +156,7 @@ export function DataView({
     }
   }
 
-  // Template file handling
-  const handleTemplateSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (file) setTemplateFile(file)
-  }
 
-  const removeTemplate = () => {
-    setTemplateFile(null)
-    if (templateInputRef.current) templateInputRef.current.value = ""
-  }
-
-  // Excel export for Dynamics
-  const handleExcelExport = async () => {
-    setIsExporting(true)
-    try {
-      const wsStart = selectedWeekStart
-      const wsEnd = endOfWeek(wsStart, { weekStartsOn: 1 })
-      const weekDays = eachDayOfInterval({ start: wsStart, end: wsEnd })
-      const weekDates = weekDays.map((d) => format(d, "yyyy-MM-dd"))
-
-      const rows = buildExportRows({
-        entries,
-        projects,
-        weekDates,
-        createdBy: "",
-        role: "",
-      })
-
-      if (rows.length === 0) {
-        setIsExporting(false)
-        return
-      }
-
-      const weekLabel = format(wsStart, "yyyy-MM-dd")
-      const filename = `time-entries-${weekLabel}.xlsx`
-
-      if (templateFile) {
-        await exportToExcelWithTemplate(templateFile, rows, filename)
-      } else {
-        await exportToExcelFresh(rows, filename)
-      }
-    } catch (err) {
-      console.error("Export failed:", err)
-    } finally {
-      setIsExporting(false)
-    }
-  }
-
-  // Count sessions for the selected export week
-  const weekSessionCount = useMemo(() => {
-    const wsStart = selectedWeekStart
-    const wsEnd = endOfWeek(wsStart, { weekStartsOn: 1 })
-    const weekDays = eachDayOfInterval({ start: wsStart, end: wsEnd })
-    const weekDates = new Set(weekDays.map((d) => format(d, "yyyy-MM-dd")))
-    let count = 0
-    for (const e of entries) {
-      if (!weekDates.has(e.date)) continue
-      for (const p of e.projects ?? []) {
-        for (const s of p.workSessions ?? []) {
-          if (s.start && s.end) count++
-        }
-      }
-    }
-    return count
-  }, [entries, selectedWeekStart])
 
   return (
     <div className="space-y-6">
@@ -388,103 +312,7 @@ export function DataView({
               </div>
             </div>
 
-            {/* Export to Excel */}
-            <div className="space-y-2">
-              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Export Time Entries</p>
-              <div className="rounded-lg border border-border bg-secondary/50 p-3 space-y-3">
-                {/* Template file */}
-                <div className="space-y-1.5">
-                  <p className="text-xs font-medium text-foreground">CRM Template</p>
-                  <p className="text-[11px] text-muted-foreground">
-                    Upload an Excel file exported from Dynamics 365 to use as a template. This preserves the hidden metadata sheets that Dynamics requires for import.
-                  </p>
-                  {templateFile ? (
-                    <div className="flex items-center gap-2 rounded-md bg-accent/10 px-2.5 py-2 text-xs">
-                      <FileSpreadsheet className="h-3.5 w-3.5 shrink-0 text-accent" />
-                      <span className="flex-1 truncate font-medium text-foreground">{templateFile.name}</span>
-                      <button
-                        type="button"
-                        onClick={removeTemplate}
-                        className="shrink-0 text-muted-foreground hover:text-foreground"
-                      >
-                        <X className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  ) : (
-                    <Input
-                      ref={templateInputRef}
-                      type="file"
-                      accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                      onChange={handleTemplateSelect}
-                      className="cursor-pointer text-xs file:mr-3 file:cursor-pointer file:rounded-md file:border-0 file:bg-accent file:px-3 file:py-1 file:text-xs file:font-medium file:text-accent-foreground"
-                    />
-                  )}
-                  {!templateFile && (
-                    <p className="text-[11px] text-amber-400">
-                      Without a template, the export will be a plain spreadsheet that cannot be imported into Dynamics 365.
-                    </p>
-                  )}
-                </div>
 
-                <div className="h-px bg-border" />
-
-                {/* Week selector */}
-                <div className="flex items-center justify-between">
-                  <div className="text-sm text-foreground">
-                    <span className="font-medium">
-                      {format(selectedWeekStart, "MMM d")}
-                    </span>
-                    <span className="text-muted-foreground"> &ndash; </span>
-                    <span className="font-medium">
-                      {format(endOfWeek(selectedWeekStart, { weekStartsOn: 1 }), "MMM d, yyyy")}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    {!isCurrentWeek && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 text-xs"
-                        onClick={() => setSelectedWeekStart(startOfWeek(today, { weekStartsOn: 1 }))}
-                      >
-                        This Week
-                      </Button>
-                    )}
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      className="h-7 w-7"
-                      onClick={() => setSelectedWeekStart((prev) => subWeeks(prev, 1))}
-                    >
-                      <ChevronLeft className="h-3.5 w-3.5" />
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      className="h-7 w-7"
-                      disabled={isCurrentWeek}
-                      onClick={() => setSelectedWeekStart((prev) => addWeeks(prev, 1))}
-                    >
-                      <ChevronRight className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
-                </div>
-
-                <Button
-                  onClick={handleExcelExport}
-                  disabled={isExporting || weekSessionCount === 0}
-                  className="w-full gap-2"
-                  variant="outline"
-                >
-                  <FileSpreadsheet className="h-4 w-4" />
-                  {isExporting
-                    ? "Exporting..."
-                    : weekSessionCount === 0
-                      ? "No sessions this week"
-                      : `Export ${weekSessionCount} session${weekSessionCount !== 1 ? "s" : ""} to Excel`}
-                </Button>
-              </div>
-            </div>
           </CardContent>
         </Card>
       </div>
