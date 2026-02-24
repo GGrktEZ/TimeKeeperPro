@@ -1,7 +1,10 @@
 "use client"
 
 import React, { useState, useRef, useMemo, useEffect, useCallback } from "react"
-import { format, parseISO, startOfWeek, endOfWeek, eachDayOfInterval, subWeeks, addWeeks, isSameWeek } from "date-fns"
+import {
+  format, parseISO, startOfWeek, endOfWeek, eachDayOfInterval,
+  subWeeks, addWeeks, isSameWeek,
+} from "date-fns"
 import {
   Download,
   FileJson,
@@ -15,11 +18,11 @@ import {
   ChevronLeft,
   ChevronRight,
   Send,
-  Link,
-  Copy,
-  Eye,
-  EyeOff,
+  Settings2,
+  LogIn,
+  LogOut,
   Loader2,
+  User,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -28,7 +31,11 @@ import { Input } from "@/components/ui/input"
 import { DynamicsSync } from "./dynamics-sync"
 import type { Project, DayEntry } from "@/lib/types"
 import { exportDay, exportMonth, exportAll, downloadJson, type ExportedData } from "@/lib/export"
-import { buildCrmPayload, syncToCrm, getWebhookUrl, setWebhookUrl, POWER_AUTOMATE_SCHEMA } from "@/lib/crm-sync"
+import {
+  getCrmSettings, saveCrmSettings, signIn, signOut,
+  tryRestoreSession, buildMergedEntries, syncToDataverse,
+  type CrmSettings, type AuthState, type SyncResult,
+} from "@/lib/crm-sync"
 
 
 interface DataViewProps {
@@ -50,33 +57,131 @@ export function DataView({
   onImportProjects,
   onUpdateProject,
 }: DataViewProps) {
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [importStatus, setImportStatus] = useState<{
     type: "success" | "error" | null
     message: string
   }>({ type: null, message: "" })
-  const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // JSON exports
+  // --- CRM Settings ---
+  const [settings, setSettings] = useState<CrmSettings>(() => getCrmSettings())
+  const [showSettings, setShowSettings] = useState(false)
+  const [settingsSaved, setSettingsSaved] = useState(false)
+
+  // --- Auth ---
+  const [auth, setAuth] = useState<AuthState>({
+    isAuthenticated: false, userName: null, userEmail: null,
+  })
+  const [authLoading, setAuthLoading] = useState(false)
+  const [authError, setAuthError] = useState<string | null>(null)
+
+  // --- Sync ---
+  const today = useMemo(() => new Date(), [])
+  const [selectedWeekStart, setSelectedWeekStart] = useState(() =>
+    startOfWeek(today, { weekStartsOn: 1 })
+  )
+  const isCurrentWeek = isSameWeek(selectedWeekStart, today, { weekStartsOn: 1 })
+  const [isSyncing, setIsSyncing] = useState(false)
+  const [syncResult, setSyncResult] = useState<SyncResult | null>(null)
+
+  // Try restore session on mount
+  useEffect(() => {
+    const s = getCrmSettings()
+    if (s.clientId && s.tenantId) {
+      tryRestoreSession(s).then(setAuth)
+    }
+  }, [])
+
+  const handleSaveSettings = () => {
+    saveCrmSettings(settings)
+    setSettingsSaved(true)
+    setTimeout(() => setSettingsSaved(false), 2000)
+  }
+
+  const handleSignIn = async () => {
+    if (!settings.clientId || !settings.tenantId || !settings.orgUrl) {
+      setAuthError("Please configure Client ID, Tenant ID, and Org URL first.")
+      return
+    }
+    setAuthLoading(true)
+    setAuthError(null)
+    try {
+      saveCrmSettings(settings)
+      const result = await signIn(settings)
+      setAuth(result)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Sign in failed"
+      setAuthError(msg)
+    } finally {
+      setAuthLoading(false)
+    }
+  }
+
+  const handleSignOut = async () => {
+    setAuthLoading(true)
+    try {
+      await signOut(settings)
+      setAuth({ isAuthenticated: false, userName: null, userEmail: null })
+    } catch {
+      // Force local state clear even if popup fails
+      setAuth({ isAuthenticated: false, userName: null, userEmail: null })
+    } finally {
+      setAuthLoading(false)
+    }
+  }
+
+  // Week entry count
+  const weekEntries = useMemo(() => {
+    const wsStart = selectedWeekStart
+    const wsEnd = endOfWeek(wsStart, { weekStartsOn: 1 })
+    const weekDays = eachDayOfInterval({ start: wsStart, end: wsEnd })
+    const weekDates = weekDays.map((d) => format(d, "yyyy-MM-dd"))
+    return buildMergedEntries({ entries, projects, weekDates })
+  }, [entries, projects, selectedWeekStart])
+
+  const handleSync = useCallback(async () => {
+    if (!auth.isAuthenticated || weekEntries.length === 0) return
+    setIsSyncing(true)
+    setSyncResult(null)
+    try {
+      const wsStart = selectedWeekStart
+      const wsEnd = endOfWeek(wsStart, { weekStartsOn: 1 })
+      const weekDays = eachDayOfInterval({ start: wsStart, end: wsEnd })
+      const weekDates = weekDays.map((d) => format(d, "yyyy-MM-dd"))
+      const merged = buildMergedEntries({ entries, projects, weekDates })
+      const result = await syncToDataverse(settings, merged)
+      setSyncResult(result)
+    } catch (err) {
+      setSyncResult({
+        success: false,
+        message: err instanceof Error ? err.message : "Unknown error",
+        created: 0,
+        failed: 0,
+        errors: [],
+      })
+    } finally {
+      setIsSyncing(false)
+    }
+  }, [auth, weekEntries, selectedWeekStart, entries, projects, settings])
+
+  // --- JSON exports ---
   const handleExportDay = () => {
     const data = exportDay(selectedDate, currentEntry, projects)
-    const filename = `timetrack-${selectedDate}.json`
-    downloadJson(data, filename)
+    downloadJson(data, `timetrack-${selectedDate}.json`)
   }
 
   const handleExportMonth = () => {
     const data = exportMonth(selectedDate, entries, projects)
     const monthStr = format(parseISO(selectedDate), "yyyy-MM")
-    const filename = `timetrack-${monthStr}.json`
-    downloadJson(data, filename)
+    downloadJson(data, `timetrack-${monthStr}.json`)
   }
 
   const handleExportAll = () => {
     const data = exportAll(entries, projects)
-    const filename = `timetrack-full-backup-${format(new Date(), "yyyy-MM-dd")}.json`
-    downloadJson(data, filename)
+    downloadJson(data, `timetrack-full-backup-${format(new Date(), "yyyy-MM-dd")}.json`)
   }
 
-  // JSON import
+  // --- JSON import ---
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
@@ -103,7 +208,7 @@ export function DataView({
             start: b.start,
             end: b.end,
           })),
-          locationBlocks: ((entry as any).locationBlocks ?? []).map((lb: any, lbIdx: number) => ({
+          locationBlocks: ((entry as Record<string, unknown>).locationBlocks as Array<Record<string, string>> ?? []).map((lb, lbIdx: number) => ({
             id: `loc-${Date.now()}-${idx}-${lbIdx}`,
             location: lb.location ?? "office",
             start: lb.start ?? "",
@@ -138,7 +243,7 @@ export function DataView({
               startDate: p.startDate ?? format(new Date(), "yyyy-MM-dd"),
               endDate: p.endDate ?? null,
               color: p.color ?? "",
-              tasks: (p as any).tasks ?? [],
+              tasks: (p as Record<string, unknown>).tasks as Project["tasks"] ?? [],
               createdAt: p.createdAt ?? new Date().toISOString(),
               updatedAt: new Date().toISOString(),
             })
@@ -146,7 +251,6 @@ export function DataView({
         }
 
         onImport({ entries: importedEntries, projects: importedProjects })
-
         setImportStatus({
           type: "success",
           message: `Successfully imported ${importedEntries.length} day(s) of data`,
@@ -159,13 +263,10 @@ export function DataView({
       }
     }
     reader.readAsText(file)
-
-    if (fileInputRef.current) {
-      fileInputRef.current.value = ""
-    }
+    if (fileInputRef.current) fileInputRef.current.value = ""
   }
 
-
+  const settingsConfigured = settings.clientId && settings.tenantId && settings.orgUrl
 
   return (
     <div className="space-y-6">
@@ -173,7 +274,7 @@ export function DataView({
         <Database className="h-5 w-5 text-accent" />
         <div>
           <h2 className="text-lg font-semibold text-foreground">Data Management</h2>
-          <p className="text-sm text-muted-foreground">Import and export your time tracking data</p>
+          <p className="text-sm text-muted-foreground">Import, export, and sync your time tracking data</p>
         </div>
       </div>
 
@@ -299,14 +400,141 @@ export function DataView({
         {/* Dynamics 365 Section */}
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Globe className="h-4 w-4 text-blue-400" />
-              Dynamics 365
-            </CardTitle>
-            <CardDescription>Sync projects and export time entries for CRM</CardDescription>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Globe className="h-4 w-4 text-blue-400" />
+                  Dynamics 365
+                </CardTitle>
+                <CardDescription>Sign in with Microsoft to sync time entries to Dataverse</CardDescription>
+              </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                onClick={() => setShowSettings(!showSettings)}
+              >
+                <Settings2 className={`h-4 w-4 transition-colors ${showSettings ? "text-accent" : "text-muted-foreground"}`} />
+              </Button>
+            </div>
           </CardHeader>
           <CardContent className="space-y-4">
-            {/* Import from Dynamics */}
+            {/* Settings (collapsible) */}
+            {showSettings && (
+              <div className="space-y-3 rounded-lg border border-border bg-secondary/30 p-3">
+                <p className="text-xs font-medium text-foreground">Azure App Registration</p>
+                <div className="space-y-2">
+                  <div>
+                    <Label htmlFor="client-id" className="text-[11px] text-muted-foreground">Client ID (Application ID)</Label>
+                    <Input
+                      id="client-id"
+                      type="text"
+                      value={settings.clientId}
+                      onChange={(e) => setSettings((s) => ({ ...s, clientId: e.target.value }))}
+                      placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                      className="mt-1 h-8 text-xs font-mono"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="tenant-id" className="text-[11px] text-muted-foreground">Tenant ID (Directory ID)</Label>
+                    <Input
+                      id="tenant-id"
+                      type="text"
+                      value={settings.tenantId}
+                      onChange={(e) => setSettings((s) => ({ ...s, tenantId: e.target.value }))}
+                      placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                      className="mt-1 h-8 text-xs font-mono"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="org-url" className="text-[11px] text-muted-foreground">Dynamics 365 URL</Label>
+                    <Input
+                      id="org-url"
+                      type="text"
+                      value={settings.orgUrl}
+                      onChange={(e) => setSettings((s) => ({ ...s, orgUrl: e.target.value }))}
+                      placeholder="https://yourorg.crm4.dynamics.com"
+                      className="mt-1 h-8 text-xs font-mono"
+                    />
+                  </div>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="w-full text-xs"
+                  onClick={handleSaveSettings}
+                >
+                  {settingsSaved ? (
+                    <span className="flex items-center gap-1.5">
+                      <CheckCircle2 className="h-3 w-3 text-accent" /> Saved
+                    </span>
+                  ) : "Save Settings"}
+                </Button>
+                <p className="text-[10px] text-muted-foreground leading-relaxed">
+                  Requires an Azure App Registration with &quot;Dynamics CRM / user_impersonation&quot; API permission and SPA redirect URI set to this app&apos;s origin.
+                </p>
+              </div>
+            )}
+
+            {/* Auth Status */}
+            <div className="space-y-2">
+              {authError && (
+                <div className="flex items-start gap-2 rounded-lg bg-destructive/10 p-2.5">
+                  <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive" />
+                  <p className="text-xs text-destructive">{authError}</p>
+                  <button
+                    type="button"
+                    onClick={() => setAuthError(null)}
+                    className="ml-auto shrink-0 text-destructive/70 hover:text-destructive"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              )}
+
+              {auth.isAuthenticated ? (
+                <div className="flex items-center gap-3 rounded-lg border border-accent/30 bg-accent/5 p-3">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent/20">
+                    <User className="h-4 w-4 text-accent" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-foreground truncate">{auth.userName}</p>
+                    <p className="text-[11px] text-muted-foreground truncate">{auth.userEmail}</p>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="shrink-0 gap-1.5 text-xs text-muted-foreground"
+                    onClick={handleSignOut}
+                    disabled={authLoading}
+                  >
+                    {authLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <LogOut className="h-3 w-3" />}
+                    Sign out
+                  </Button>
+                </div>
+              ) : (
+                <Button
+                  className="w-full gap-2"
+                  onClick={handleSignIn}
+                  disabled={authLoading || !settingsConfigured}
+                >
+                  {authLoading ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <LogIn className="h-4 w-4" />
+                  )}
+                  Sign in with Microsoft
+                </Button>
+              )}
+
+              {!settingsConfigured && !auth.isAuthenticated && (
+                <p className="text-[11px] text-amber-400">
+                  Configure your Azure App Registration in settings (gear icon) to enable sign in.
+                </p>
+              )}
+            </div>
+
+            {/* Import Projects */}
             <div className="space-y-2">
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Import Projects</p>
               <div className="rounded-lg border border-border bg-secondary/50 p-3">
@@ -321,7 +549,148 @@ export function DataView({
               </div>
             </div>
 
+            {/* Sync Time Entries */}
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Sync Time Entries</p>
+              <div className="rounded-lg border border-border bg-secondary/50 p-3 space-y-3">
+                <p className="text-xs text-muted-foreground">
+                  Push weekly time entries directly to Dynamics 365 as draft time entries. Projects with Dynamics IDs are automatically linked.
+                </p>
 
+                {/* Week selector */}
+                <div className="flex items-center justify-between">
+                  <div className="text-sm text-foreground">
+                    <span className="font-medium">
+                      {format(selectedWeekStart, "MMM d")}
+                    </span>
+                    <span className="text-muted-foreground"> &ndash; </span>
+                    <span className="font-medium">
+                      {format(endOfWeek(selectedWeekStart, { weekStartsOn: 1 }), "MMM d, yyyy")}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    {!isCurrentWeek && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 text-xs"
+                        onClick={() => setSelectedWeekStart(startOfWeek(today, { weekStartsOn: 1 }))}
+                      >
+                        This Week
+                      </Button>
+                    )}
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="h-7 w-7"
+                      onClick={() => setSelectedWeekStart((prev) => subWeeks(prev, 1))}
+                    >
+                      <ChevronLeft className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="h-7 w-7"
+                      disabled={isCurrentWeek}
+                      onClick={() => setSelectedWeekStart((prev) => addWeeks(prev, 1))}
+                    >
+                      <ChevronRight className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Entry preview */}
+                {weekEntries.length > 0 && (
+                  <div className="max-h-40 overflow-y-auto rounded-md border border-border bg-background">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="border-b border-border text-muted-foreground">
+                          <th className="px-2 py-1.5 text-left font-medium">Date</th>
+                          <th className="px-2 py-1.5 text-left font-medium">Project</th>
+                          <th className="px-2 py-1.5 text-left font-medium">Task</th>
+                          <th className="px-2 py-1.5 text-right font-medium">Mins</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {weekEntries.map((e, i) => (
+                          <tr key={i} className="border-b border-border/50 last:border-0">
+                            <td className="px-2 py-1 tabular-nums text-muted-foreground">{format(parseISO(e.date), "EEE d")}</td>
+                            <td className="px-2 py-1 truncate max-w-[140px]">
+                              <span className={e.dynamicsProjectId ? "text-foreground" : "text-amber-400"}>
+                                {e.projectName}
+                              </span>
+                              {!e.dynamicsProjectId && (
+                                <span className="ml-1 text-[10px] text-amber-400/70">(no CRM link)</span>
+                              )}
+                            </td>
+                            <td className="px-2 py-1 text-muted-foreground truncate max-w-[100px]">{e.taskName || "--"}</td>
+                            <td className="px-2 py-1 text-right tabular-nums">{e.minutes}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {/* Sync result */}
+                {syncResult && (
+                  <div
+                    className={`flex items-start gap-2 rounded-lg p-2.5 ${
+                      syncResult.success
+                        ? "bg-emerald-500/10 text-emerald-400"
+                        : "bg-destructive/10 text-destructive"
+                    }`}
+                  >
+                    {syncResult.success ? (
+                      <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                    ) : (
+                      <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                    )}
+                    <div className="flex-1 space-y-1">
+                      <p className="text-xs">{syncResult.message}</p>
+                      {syncResult.errors.length > 0 && (
+                        <details className="text-[10px]">
+                          <summary className="cursor-pointer">Show {syncResult.errors.length} error(s)</summary>
+                          <ul className="mt-1 space-y-0.5 font-mono">
+                            {syncResult.errors.map((err, i) => (
+                              <li key={i}>{err}</li>
+                            ))}
+                          </ul>
+                        </details>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setSyncResult(null)}
+                      className="shrink-0 opacity-70 hover:opacity-100"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                )}
+
+                {/* Sync button */}
+                <Button
+                  className="w-full gap-2"
+                  onClick={handleSync}
+                  disabled={isSyncing || !auth.isAuthenticated || weekEntries.length === 0}
+                >
+                  {isSyncing ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Send className="h-4 w-4" />
+                  )}
+                  {isSyncing
+                    ? "Syncing..."
+                    : !auth.isAuthenticated
+                      ? "Sign in to sync"
+                      : weekEntries.length === 0
+                        ? "No entries this week"
+                        : `Sync ${weekEntries.length} ${weekEntries.length === 1 ? "entry" : "entries"} to Dynamics`
+                  }
+                </Button>
+              </div>
+            </div>
           </CardContent>
         </Card>
       </div>
