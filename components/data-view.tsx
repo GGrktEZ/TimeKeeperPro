@@ -1,7 +1,7 @@
 "use client"
 
-import React, { useState, useRef } from "react"
-import { format, parseISO } from "date-fns"
+import React, { useState, useRef, useMemo, useEffect, useCallback } from "react"
+import { format, parseISO, startOfWeek, endOfWeek, eachDayOfInterval, subWeeks, addWeeks, isSameWeek } from "date-fns"
 import {
   Download,
   FileJson,
@@ -12,6 +12,14 @@ import {
   AlertCircle,
   X,
   Globe,
+  ChevronLeft,
+  ChevronRight,
+  Send,
+  Link,
+  Copy,
+  Eye,
+  EyeOff,
+  Loader2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -20,6 +28,7 @@ import { Input } from "@/components/ui/input"
 import { DynamicsSync } from "./dynamics-sync"
 import type { Project, DayEntry } from "@/lib/types"
 import { exportDay, exportMonth, exportAll, downloadJson, type ExportedData } from "@/lib/export"
+import { buildCrmPayload, syncToCrm, getWebhookUrl, setWebhookUrl, POWER_AUTOMATE_SCHEMA } from "@/lib/crm-sync"
 
 
 interface DataViewProps {
