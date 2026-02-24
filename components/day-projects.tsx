@@ -208,14 +208,16 @@ function WorkSessionItem({
             </span>
           )}
         </div>
-        <div className="grid flex-1 grid-cols-2 gap-2">
+          <div className="grid flex-1 grid-cols-2 gap-2">
           <div className="flex gap-1">
             <Input
-              type="time"
+              type="text"
+              inputMode="numeric"
               value={session.start}
               onChange={(e) => updateSession("start", e.target.value)}
-              className="h-8 text-sm"
-              placeholder="Start"
+              className="h-8 text-sm tabular-nums"
+              placeholder="HH:MM"
+              maxLength={5}
             />
             <Button
               variant="ghost"
@@ -229,11 +231,13 @@ function WorkSessionItem({
           </div>
           <div className="flex gap-1">
             <Input
-              type="time"
+              type="text"
+              inputMode="numeric"
               value={session.end}
               onChange={(e) => updateSession("end", e.target.value)}
-              className="h-8 text-sm"
-              placeholder="End"
+              className="h-8 text-sm tabular-nums"
+              placeholder="HH:MM"
+              maxLength={5}
             />
             <Button
               variant="ghost"
