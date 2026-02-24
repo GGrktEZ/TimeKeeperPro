@@ -19,8 +19,10 @@ import {
   ChevronRight,
   Send,
   Settings2,
+  LogIn,
   LogOut,
   Loader2,
+  User,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -404,82 +406,26 @@ export function DataView({
                   <Globe className="h-4 w-4 text-blue-400" />
                   Dynamics 365
                 </CardTitle>
-                <CardDescription>
-                  {auth.isAuthenticated
-                    ? `Connected as ${auth.userName}`
-                    : "Sign in to sync time entries to Dataverse"
-                  }
-                </CardDescription>
+                <CardDescription>Sign in with Microsoft to sync time entries to Dataverse</CardDescription>
               </div>
-              {auth.isAuthenticated && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="shrink-0 gap-1.5 text-xs text-muted-foreground"
-                  onClick={handleSignOut}
-                  disabled={authLoading}
-                >
-                  {authLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <LogOut className="h-3 w-3" />}
-                  Sign out
-                </Button>
-              )}
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                onClick={() => setShowSettings(!showSettings)}
+              >
+                <Settings2 className={`h-4 w-4 transition-colors ${showSettings ? "text-accent" : "text-muted-foreground"}`} />
+              </Button>
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
-            {/* Auth section */}
-            <div className="space-y-2">
-              {authError && (
-                <div className="flex items-start gap-2 rounded-lg bg-destructive/10 p-2.5">
-                  <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive" />
-                  <p className="text-xs text-destructive">{authError}</p>
-                  <button
-                    type="button"
-                    onClick={() => setAuthError(null)}
-                    className="ml-auto shrink-0 text-destructive/70 hover:text-destructive"
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                </div>
-              )}
-
-              {!auth.isAuthenticated && (
-                <>
-                  {/* Microsoft Sign In button -- branded style */}
-                  <button
-                    type="button"
-                    onClick={handleSignIn}
-                    disabled={authLoading || !settingsConfigured}
-                    className="flex w-full items-center justify-center gap-3 rounded-md border border-[#8c8c8c] bg-white px-4 py-2.5 text-sm font-semibold text-[#5e5e5e] shadow-sm transition-colors hover:bg-[#f3f3f3] disabled:pointer-events-none disabled:opacity-50"
-                  >
-                    {authLoading ? (
-                      <Loader2 className="h-4 w-4 animate-spin text-[#5e5e5e]" />
-                    ) : (
-                      <svg xmlns="http://www.w3.org/2000/svg" width="21" height="21" viewBox="0 0 21 21">
-                        <rect x="1" y="1" width="9" height="9" fill="#f25022"/>
-                        <rect x="1" y="11" width="9" height="9" fill="#00a4ef"/>
-                        <rect x="11" y="1" width="9" height="9" fill="#7fba00"/>
-                        <rect x="11" y="11" width="9" height="9" fill="#ffb900"/>
-                      </svg>
-                    )}
-                    Sign in with Microsoft
-                  </button>
-
-                  {!settingsConfigured && (
-                    <p className="text-[11px] text-amber-400">
-                      Configure your connection below to enable sign in.
-                    </p>
-                  )}
-                </>
-              )}
-            </div>
-
-            {/* Connection settings -- always visible when not signed in, collapsible when signed in */}
-            {(!auth.isAuthenticated || showSettings) && (
+            {/* Settings (collapsible) */}
+            {showSettings && (
               <div className="space-y-3 rounded-lg border border-border bg-secondary/30 p-3">
-                <p className="text-xs font-medium text-foreground">Connection Settings</p>
+                <p className="text-xs font-medium text-foreground">Azure App Registration</p>
                 <div className="space-y-2">
                   <div>
-                    <Label htmlFor="client-id" className="text-[11px] text-muted-foreground">Client ID</Label>
+                    <Label htmlFor="client-id" className="text-[11px] text-muted-foreground">Client ID (Application ID)</Label>
                     <Input
                       id="client-id"
                       type="text"
@@ -490,7 +436,7 @@ export function DataView({
                     />
                   </div>
                   <div>
-                    <Label htmlFor="tenant-id" className="text-[11px] text-muted-foreground">Tenant ID</Label>
+                    <Label htmlFor="tenant-id" className="text-[11px] text-muted-foreground">Tenant ID (Directory ID)</Label>
                     <Input
                       id="tenant-id"
                       type="text"
@@ -524,30 +470,69 @@ export function DataView({
                     </span>
                   ) : "Save Settings"}
                 </Button>
+                <p className="text-[10px] text-muted-foreground leading-relaxed">
+                  Requires an Azure App Registration with &quot;Dynamics CRM / user_impersonation&quot; API permission and SPA redirect URI set to this app&apos;s origin.
+                </p>
               </div>
             )}
 
-            {/* When signed in, show a toggle for settings */}
-            {auth.isAuthenticated && !showSettings && (
-              <button
-                type="button"
-                onClick={() => setShowSettings(true)}
-                className="flex items-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
-              >
-                <Settings2 className="h-3 w-3" />
-                Connection settings
-              </button>
-            )}
-            {auth.isAuthenticated && showSettings && (
-              <button
-                type="button"
-                onClick={() => setShowSettings(false)}
-                className="flex items-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
-              >
-                <X className="h-3 w-3" />
-                Hide settings
-              </button>
-            )}
+            {/* Auth Status */}
+            <div className="space-y-2">
+              {authError && (
+                <div className="flex items-start gap-2 rounded-lg bg-destructive/10 p-2.5">
+                  <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive" />
+                  <p className="text-xs text-destructive">{authError}</p>
+                  <button
+                    type="button"
+                    onClick={() => setAuthError(null)}
+                    className="ml-auto shrink-0 text-destructive/70 hover:text-destructive"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              )}
+
+              {auth.isAuthenticated ? (
+                <div className="flex items-center gap-3 rounded-lg border border-accent/30 bg-accent/5 p-3">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent/20">
+                    <User className="h-4 w-4 text-accent" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-foreground truncate">{auth.userName}</p>
+                    <p className="text-[11px] text-muted-foreground truncate">{auth.userEmail}</p>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="shrink-0 gap-1.5 text-xs text-muted-foreground"
+                    onClick={handleSignOut}
+                    disabled={authLoading}
+                  >
+                    {authLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <LogOut className="h-3 w-3" />}
+                    Sign out
+                  </Button>
+                </div>
+              ) : (
+                <Button
+                  className="w-full gap-2"
+                  onClick={handleSignIn}
+                  disabled={authLoading || !settingsConfigured}
+                >
+                  {authLoading ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <LogIn className="h-4 w-4" />
+                  )}
+                  Sign in with Microsoft
+                </Button>
+              )}
+
+              {!settingsConfigured && !auth.isAuthenticated && (
+                <p className="text-[11px] text-amber-400">
+                  Configure your Azure App Registration in settings (gear icon) to enable sign in.
+                </p>
+              )}
+            </div>
 
             {/* Import Projects */}
             <div className="space-y-2">
