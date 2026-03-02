@@ -9,6 +9,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 import type { DayEntry, Break, DayProjectEntry, WorkSession, LocationBlock, LocationType } from "@/lib/types"
+import { timeDiffMinutes } from "@/lib/utils"
 import { parseISO, isToday } from "date-fns"
 
 interface TimeEntryProps {
@@ -27,12 +28,7 @@ function calculateSessionsMinutes(sessions: WorkSession[]): number {
   let totalMinutes = 0
   for (const session of sessions) {
     if (session.start && session.end) {
-      const [sH, sM] = session.start.split(":").map(Number)
-      const [eH, eM] = session.end.split(":").map(Number)
-      const duration = (eH * 60 + eM) - (sH * 60 + sM)
-      if (duration > 0) {
-        totalMinutes += duration
-      }
+      totalMinutes += timeDiffMinutes(session.start, session.end)
     }
   }
   return totalMinutes
@@ -54,17 +50,16 @@ function calculateLocationMinutes(blocks: LocationBlock[], location?: LocationTy
   for (const block of blocks) {
     if (location && block.location !== location) continue
     if (!block.start) continue
-    const startMin = timeStringToMinutes(block.start)
-    let endMin: number
+    let endTime: string
     if (block.end) {
-      endMin = timeStringToMinutes(block.end)
+      endTime = block.end
     } else if (useLive) {
-      endMin = getCurrentTimeMinutes()
+      const now = new Date()
+      endTime = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`
     } else {
       continue
     }
-    const dur = endMin - startMin
-    if (dur > 0) total += dur
+    total += timeDiffMinutes(block.start, endTime)
   }
   return total
 }
@@ -76,25 +71,25 @@ function calculateTotalClockedMinutes(entry: DayEntry | undefined, useLive?: boo
   if (blocks.length === 0) {
     // Fallback to legacy clockIn/clockOut
     if (!entry.clockIn) return 0
-    const startMin = timeStringToMinutes(entry.clockIn)
-    let endMin: number
+    let endTime: string
     if (entry.clockOut) {
-      endMin = timeStringToMinutes(entry.clockOut)
+      endTime = entry.clockOut
     } else if (useLive) {
-      endMin = getCurrentTimeMinutes()
+      const now = new Date()
+      endTime = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`
     } else {
       return 0
     }
-    let total = endMin - startMin
+    let total = timeDiffMinutes(entry.clockIn, endTime)
     if (total <= 0) return 0
     // Subtract breaks
     for (const brk of entry.breaks ?? []) {
       if (brk.start && brk.end) {
-        const d = timeStringToMinutes(brk.end) - timeStringToMinutes(brk.start)
-        if (d > 0) total -= d
+        total -= timeDiffMinutes(brk.start, brk.end)
       } else if (brk.start && !brk.end && useLive) {
-        const d = getCurrentTimeMinutes() - timeStringToMinutes(brk.start)
-        if (d > 0) total -= d
+        const now = new Date()
+        const liveEnd = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`
+        total -= timeDiffMinutes(brk.start, liveEnd)
       }
     }
     return Math.max(0, total)
@@ -104,11 +99,11 @@ function calculateTotalClockedMinutes(entry: DayEntry | undefined, useLive?: boo
   // Subtract breaks
   for (const brk of entry.breaks ?? []) {
     if (brk.start && brk.end) {
-      const d = timeStringToMinutes(brk.end) - timeStringToMinutes(brk.start)
-      if (d > 0) total -= d
+      total -= timeDiffMinutes(brk.start, brk.end)
     } else if (brk.start && !brk.end && useLive) {
-      const d = getCurrentTimeMinutes() - timeStringToMinutes(brk.start)
-      if (d > 0) total -= d
+      const now = new Date()
+      const liveEnd = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`
+      total -= timeDiffMinutes(brk.start, liveEnd)
     }
   }
   return Math.max(0, total)
@@ -134,10 +129,14 @@ function calculateLiveProjectMinutes(entry: DayEntry | undefined): number {
     if (project.workSessions) {
       for (const session of project.workSessions) {
         if (session.start) {
-          const startMin = timeStringToMinutes(session.start)
-          const endMin = session.end ? timeStringToMinutes(session.end) : getCurrentTimeMinutes()
-          const duration = endMin - startMin
-          if (duration > 0) totalMinutes += duration
+          let endTime: string
+          if (session.end) {
+            endTime = session.end
+          } else {
+            const now = new Date()
+            endTime = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`
+          }
+          totalMinutes += timeDiffMinutes(session.start, endTime)
         }
       }
     }
@@ -356,7 +355,7 @@ export function TimeEntry({ entry, selectedDate, onUpdate, dayProjects, onUpdate
   // --- Duration calculations ---
   const calculateLunchDuration = () => {
     if (!lunchStart || !lunchEnd) return null
-    const diff = timeStringToMinutes(lunchEnd) - timeStringToMinutes(lunchStart)
+    const diff = timeDiffMinutes(lunchStart, lunchEnd)
     if (diff <= 0) return null
     const hours = Math.floor(diff / 60)
     const minutes = diff % 60
@@ -367,8 +366,7 @@ export function TimeEntry({ entry, selectedDate, onUpdate, dayProjects, onUpdate
     let totalMinutes = 0
     for (const brk of breaks) {
       if (brk.start && brk.end) {
-        const duration = timeStringToMinutes(brk.end) - timeStringToMinutes(brk.start)
-        if (duration > 0) totalMinutes += duration
+        totalMinutes += timeDiffMinutes(brk.start, brk.end)
       }
     }
     if (totalMinutes <= 0) return null

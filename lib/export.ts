@@ -1,4 +1,5 @@
 import type { DayEntry, Project, WorkSession, LocationBlock } from "./types"
+import { timeDiffMinutes } from "./utils"
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, parseISO } from "date-fns"
 
 export interface ExportedDayEntry {
@@ -51,12 +52,7 @@ function calculateProjectMinutes(entry: DayEntry): number {
     if (project.workSessions) {
       for (const session of project.workSessions) {
         if (session.start && session.end) {
-          const [sH, sM] = session.start.split(":").map(Number)
-          const [eH, eM] = session.end.split(":").map(Number)
-          const duration = (eH * 60 + eM) - (sH * 60 + sM)
-          if (duration > 0) {
-            totalMinutes += duration
-          }
+          totalMinutes += timeDiffMinutes(session.start, session.end)
         }
       }
     }
@@ -68,22 +64,14 @@ function calculateProjectMinutes(entry: DayEntry): number {
 function calculateOfficeMinutes(entry: DayEntry): number | null {
   if (!entry.clockIn || !entry.clockOut) return null
   
-  const [inH, inM] = entry.clockIn.split(":").map(Number)
-  const [outH, outM] = entry.clockOut.split(":").map(Number)
-  let totalMinutes = (outH * 60 + outM) - (inH * 60 + inM)
-  
+  let totalMinutes = timeDiffMinutes(entry.clockIn, entry.clockOut)
   if (totalMinutes <= 0) return null
   
   // Subtract breaks only
   if (entry.breaks && entry.breaks.length > 0) {
     for (const brk of entry.breaks) {
       if (brk.start && brk.end) {
-        const [bsH, bsM] = brk.start.split(":").map(Number)
-        const [beH, beM] = brk.end.split(":").map(Number)
-        const breakDuration = (beH * 60 + beM) - (bsH * 60 + bsM)
-        if (breakDuration > 0) {
-          totalMinutes -= breakDuration
-        }
+        totalMinutes -= timeDiffMinutes(brk.start, brk.end)
       }
     }
   }
@@ -101,10 +89,7 @@ function calculateLocationMinutes(blocks: LocationBlock[], location: 'office' | 
   let total = 0
   for (const b of blocks) {
     if (b.location !== location || !b.start || !b.end) continue
-    const [sH, sM] = b.start.split(":").map(Number)
-    const [eH, eM] = b.end.split(":").map(Number)
-    const d = (eH * 60 + eM) - (sH * 60 + sM)
-    if (d > 0) total += d
+    total += timeDiffMinutes(b.start, b.end)
   }
   return total
 }
@@ -135,9 +120,7 @@ function transformEntry(entry: DayEntry, projects: Project[]): ExportedDayEntry 
         name: project?.name ?? "Unknown Project",
         hoursWorked: p.hoursWorked,
         workSessions: (p.workSessions ?? []).filter(s => s.start && s.end).map(s => {
-          const [sH, sM] = s.start.split(":").map(Number)
-          const [eH, eM] = s.end.split(":").map(Number)
-          const durationMinutes = Math.max(0, (eH * 60 + eM) - (sH * 60 + sM))
+          const durationMinutes = timeDiffMinutes(s.start, s.end)
           return { 
             start: s.start, 
             end: s.end, 

@@ -18,6 +18,7 @@ import {
   format, subDays, eachDayOfInterval, getDay, subWeeks, addWeeks, isSameWeek,
 } from "date-fns"
 import type { DayEntry, Project, LocationBlock } from "@/lib/types"
+import { timeDiffMinutes } from "@/lib/utils"
 
 interface StatsViewProps {
   entries: DayEntry[]
@@ -29,10 +30,7 @@ function sessionMinutes(sessions: { start: string; end: string }[]): number {
   let total = 0
   for (const s of sessions) {
     if (s.start && s.end) {
-      const [sH, sM] = s.start.split(":").map(Number)
-      const [eH, eM] = s.end.split(":").map(Number)
-      const d = (eH * 60 + eM) - (sH * 60 + sM)
-      if (d > 0) total += d
+      total += timeDiffMinutes(s.start, s.end)
     }
   }
   return total
@@ -48,16 +46,11 @@ function entryWorkMinutes(entry: DayEntry): number {
 
 function entryOfficeMinutes(entry: DayEntry): number {
   if (!entry.clockIn || !entry.clockOut) return 0
-  const [iH, iM] = entry.clockIn.split(":").map(Number)
-  const [oH, oM] = entry.clockOut.split(":").map(Number)
-  let total = (oH * 60 + oM) - (iH * 60 + iM)
+  let total = timeDiffMinutes(entry.clockIn, entry.clockOut)
   if (total <= 0) return 0
   for (const b of entry.breaks ?? []) {
     if (b.start && b.end) {
-      const [bsH, bsM] = b.start.split(":").map(Number)
-      const [beH, beM] = b.end.split(":").map(Number)
-      const d = (beH * 60 + beM) - (bsH * 60 + bsM)
-      if (d > 0) total -= d
+      total -= timeDiffMinutes(b.start, b.end)
     }
   }
   return Math.max(0, total)
@@ -65,10 +58,7 @@ function entryOfficeMinutes(entry: DayEntry): number {
 
 function entryLunchMinutes(entry: DayEntry): number {
   if (!entry.lunchStart || !entry.lunchEnd) return 0
-  const [sH, sM] = entry.lunchStart.split(":").map(Number)
-  const [eH, eM] = entry.lunchEnd.split(":").map(Number)
-  const d = (eH * 60 + eM) - (sH * 60 + sM)
-  return d > 0 ? d : 0
+  return timeDiffMinutes(entry.lunchStart, entry.lunchEnd)
 }
 
 function entryLocationMinutes(entry: DayEntry, location: 'office' | 'home'): number {
@@ -80,10 +70,7 @@ function entryLocationMinutes(entry: DayEntry, location: 'office' | 'home'): num
   let total = 0
   for (const b of blocks) {
     if (b.location !== location || !b.start || !b.end) continue
-    const [sH, sM] = b.start.split(":").map(Number)
-    const [eH, eM] = b.end.split(":").map(Number)
-    const d = (eH * 60 + eM) - (sH * 60 + sM)
-    if (d > 0) total += d
+    total += timeDiffMinutes(b.start, b.end)
   }
   return total
 }
@@ -92,10 +79,7 @@ function entryBreakMinutes(entry: DayEntry): number {
   let total = 0
   for (const b of entry.breaks ?? []) {
     if (b.start && b.end) {
-      const [sH, sM] = b.start.split(":").map(Number)
-      const [eH, eM] = b.end.split(":").map(Number)
-      const d = (eH * 60 + eM) - (sH * 60 + sM)
-      if (d > 0) total += d
+      total += timeDiffMinutes(b.start, b.end)
     }
   }
   return total
