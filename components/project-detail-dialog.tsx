@@ -12,6 +12,7 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { format, parseISO, differenceInDays, isAfter, startOfWeek, endOfWeek, startOfMonth, endOfMonth, isWithinInterval } from "date-fns"
 import type { Project, DayEntry, WorkSession } from "@/lib/types"
+import { timeDiffMinutes } from "@/lib/utils"
 
 interface ProjectDetailDialogProps {
   project: Project
@@ -29,9 +30,7 @@ function minutesToHoursString(minutes: number): string {
 
 function calculateSessionMinutes(session: WorkSession): number {
   if (!session.start || !session.end) return 0
-  const [sH, sM] = session.start.split(":").map(Number)
-  const [eH, eM] = session.end.split(":").map(Number)
-  return Math.max(0, (eH * 60 + eM) - (sH * 60 + sM))
+  return timeDiffMinutes(session.start, session.end)
 }
 
 export function ProjectDetailDialog({ project, entries, open, onOpenChange }: ProjectDetailDialogProps) {

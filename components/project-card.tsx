@@ -26,6 +26,7 @@ import { ProjectForm } from "./project-form"
 import { ProjectDetailDialog } from "./project-detail-dialog"
 import { format, parseISO, differenceInDays, isAfter } from "date-fns"
 import type { Project, DayEntry } from "@/lib/types"
+import { timeDiffMinutes } from "@/lib/utils"
 
 interface ProjectCardProps {
   project: Project
@@ -74,10 +75,7 @@ export function ProjectCard({ project, entries, onUpdate, onDelete }: ProjectCar
       const sessions = projectEntry.workSessions ?? []
       for (const session of sessions) {
         if (session.start && session.end) {
-          const [sH, sM] = session.start.split(":").map(Number)
-          const [eH, eM] = session.end.split(":").map(Number)
-          const mins = Math.max(0, (eH * 60 + eM) - (sH * 60 + sM))
-          totalMinutes += mins
+          totalMinutes += timeDiffMinutes(session.start, session.end)
           sessionsCount++
         }
       }

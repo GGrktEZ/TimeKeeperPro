@@ -18,6 +18,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import type { Project, ProjectTask, DayProjectEntry, WorkSession } from "@/lib/types"
+import { timeDiffMinutes } from "@/lib/utils"
 
 interface DayProjectsProps {
   projects: Project[]
@@ -46,12 +47,7 @@ function calculateSessionsMinutes(sessions: WorkSession[]): number {
   let totalMinutes = 0
   for (const session of sessions) {
     if (session.start && session.end) {
-      const [sH, sM] = session.start.split(":").map(Number)
-      const [eH, eM] = session.end.split(":").map(Number)
-      const duration = (eH * 60 + eM) - (sH * 60 + sM)
-      if (duration > 0) {
-        totalMinutes += duration
-      }
+      totalMinutes += timeDiffMinutes(session.start, session.end)
     }
   }
   return totalMinutes
@@ -61,20 +57,14 @@ function calculateLiveSessionsMinutes(sessions: WorkSession[]): number {
   let totalMinutes = 0
   for (const session of sessions) {
     if (session.start) {
-      const startMin = timeStringToMinutes(session.start)
-      let endMin: number
-      
+      let endTime: string
       if (session.end) {
-        endMin = timeStringToMinutes(session.end)
+        endTime = session.end
       } else {
-        // Active session - use current time
-        endMin = getCurrentTimeMinutes()
+        const now = new Date()
+        endTime = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`
       }
-      
-      const duration = endMin - startMin
-      if (duration > 0) {
-        totalMinutes += duration
-      }
+      totalMinutes += timeDiffMinutes(session.start, endTime)
     }
   }
   return totalMinutes

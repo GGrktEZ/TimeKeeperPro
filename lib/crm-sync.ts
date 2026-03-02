@@ -1,4 +1,5 @@
 import type { DayEntry, Project, WorkSession } from "./types"
+import { timeDiffMinutes } from "./utils"
 
 // ---- Settings persistence (localStorage for config only) ----
 
@@ -200,10 +201,7 @@ interface DataverseTimeEntry {
 
 function sessionMinutes(session: WorkSession): number {
   if (!session.start || !session.end) return 0
-  const [sH, sM] = session.start.split(":").map(Number)
-  const [eH, eM] = session.end.split(":").map(Number)
-  const diff = (eH * 60 + eM) - (sH * 60 + sM)
-  return diff > 0 ? diff : 0
+  return timeDiffMinutes(session.start, session.end)
 }
 
 export interface BuildPayloadOptions {
