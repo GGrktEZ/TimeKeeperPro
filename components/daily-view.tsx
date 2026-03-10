@@ -59,6 +59,7 @@ export function DailyView({
           projects={projects}
           dayProjects={entry?.projects ?? []}
           todoGroups={todoGroups}
+          selectedDate={selectedDate}
           onAddProject={onAddProject}
           onUpdateProject={onUpdateProject}
           onRemoveProject={onRemoveProject}

@@ -2,7 +2,7 @@
 
 import React from "react"
 
-import { Trash2, FolderKanban, Clock, Plus, Play, Square, CheckCircle2, ListTodo, ChevronDown, ChevronUp, GripVertical } from "lucide-react"
+import { Trash2, FolderKanban, Clock, Plus, Play, Square, CheckCircle2, ListTodo, ChevronDown, ChevronUp, GripVertical, Check } from "lucide-react"
 import { useState, useEffect, useRef, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -15,6 +15,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import type { Project, ProjectTask, DayProjectEntry, WorkSession, TodoGroup, TodoItem } from "@/lib/types"
@@ -24,6 +25,7 @@ interface DayProjectsProps {
   projects: Project[]
   dayProjects: DayProjectEntry[]
   todoGroups: TodoGroup[]
+  selectedDate: string
   onAddProject: (projectId: string, taskId?: string) => void
   onUpdateProject: (projectEntryId: string, data: Partial<DayProjectEntry>) => void
   onRemoveProject: (projectEntryId: string) => void
@@ -309,6 +311,7 @@ export function DayProjects({
   projects,
   dayProjects,
   todoGroups,
+  selectedDate,
   onAddProject,
   onUpdateProject,
   onRemoveProject,
@@ -576,22 +579,86 @@ export function DayProjects({
                         </span>
                       </Label>
                       <div className="rounded-md border border-border/50 bg-background/30 px-1 py-1 space-y-0.5">
-                        {linkedTodoGroup.items.map((item) => (
-                          <div key={item.id} className="flex items-center gap-2 px-1.5 py-1 rounded hover:bg-secondary/50 group">
-                            <button
-                              onClick={() => onUpdateTodoItem(linkedTodoGroup.id, item.id, { done: !item.done })}
-                              className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
-                            >
-                              {item.done
-                                ? <CheckCircle2 className="h-3.5 w-3.5 text-accent" />
-                                : <CheckCircle2 className="h-3.5 w-3.5 opacity-30" />
-                              }
-                            </button>
-                            <span className={`text-xs flex-1 ${item.done ? "line-through text-muted-foreground" : "text-foreground"}`}>
-                              {item.text}
-                            </span>
-                          </div>
-                        ))}
+                        {linkedTodoGroup.items.map((item) => {
+                          const activeSession = sessions.find(s => s.start && !s.end)
+                          const linkedSession = item.sessionId ? sessions.find(s => s.id === item.sessionId) : null
+                          const sessionIndex = item.sessionId ? sessions.findIndex(s => s.id === item.sessionId) : -1
+
+                          const handleToggleDone = () => {
+                            const nowDone = !item.done
+                            onUpdateTodoItem(linkedTodoGroup.id, item.id, {
+                              done: nowDone,
+                              doneAt: nowDone ? new Date().toISOString() : undefined,
+                              sessionId: nowDone && activeSession ? activeSession.id : (nowDone ? item.sessionId : undefined),
+                              sessionSnapshot: nowDone && activeSession
+                                ? { date: selectedDate, start: activeSession.start, end: activeSession.end }
+                                : (nowDone && item.sessionSnapshot ? item.sessionSnapshot : undefined),
+                            })
+                          }
+
+                          return (
+                            <div key={item.id} className="flex items-center gap-2 px-1.5 py-1 rounded hover:bg-secondary/50 group">
+                              <button
+                                onClick={handleToggleDone}
+                                className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+                              >
+                                {item.done
+                                  ? <CheckCircle2 className="h-3.5 w-3.5 text-accent" />
+                                  : <CheckCircle2 className="h-3.5 w-3.5 opacity-30" />
+                                }
+                              </button>
+                              <span className={`text-xs flex-1 ${item.done ? "line-through text-muted-foreground" : "text-foreground"}`}>
+                                {item.text}
+                              </span>
+                              {/* Session badge / picker */}
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <button className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] tabular-nums transition-colors ${
+                                    linkedSession
+                                      ? "bg-accent/20 text-accent hover:bg-accent/30"
+                                      : "opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground"
+                                  }`}>
+                                    {linkedSession
+                                      ? `S${sessionIndex + 1} · ${linkedSession.start}${linkedSession.end ? `–${linkedSession.end}` : ""}`
+                                      : "assign"
+                                    }
+                                  </button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end" className="w-48">
+                                  <DropdownMenuLabel className="text-xs text-muted-foreground font-normal">Assign to session</DropdownMenuLabel>
+                                  {sessions.filter(s => s.start).map((s, si) => (
+                                    <DropdownMenuItem
+                                      key={s.id}
+                                      onClick={() => onUpdateTodoItem(linkedTodoGroup.id, item.id, {
+                                        sessionId: s.id,
+                                        sessionSnapshot: { date: selectedDate, start: s.start, end: s.end },
+                                      })}
+                                      className="gap-2 text-xs"
+                                    >
+                                      <span className="text-muted-foreground w-4">S{si + 1}</span>
+                                      <span>{s.start}{s.end ? `–${s.end}` : " (active)"}</span>
+                                      {item.sessionId === s.id && <Check className="h-3 w-3 ml-auto text-accent" />}
+                                    </DropdownMenuItem>
+                                  ))}
+                                  {item.sessionId && (
+                                    <>
+                                      <DropdownMenuSeparator />
+                                      <DropdownMenuItem
+                                        onClick={() => onUpdateTodoItem(linkedTodoGroup.id, item.id, { sessionId: undefined, sessionSnapshot: undefined })}
+                                        className="text-xs text-muted-foreground"
+                                      >
+                                        Remove assignment
+                                      </DropdownMenuItem>
+                                    </>
+                                  )}
+                                  {sessions.filter(s => s.start).length === 0 && (
+                                    <DropdownMenuItem disabled className="text-xs">No sessions yet</DropdownMenuItem>
+                                  )}
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </div>
+                          )
+                        })}
                       </div>
                     </div>
                   )}

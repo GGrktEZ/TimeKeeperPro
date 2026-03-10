@@ -1,16 +1,16 @@
 "use client"
 
-import { useState, useRef, useEffect } from "react"
-import { Plus, Trash2, CheckSquare, Square, Briefcase, User, Link, X } from "lucide-react"
+import { useState, useRef, useEffect, useMemo } from "react"
+import { Plus, Trash2, CheckSquare, Square, Briefcase, User, Link, X, Search } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-  DropdownMenuSeparator,
-} from "@/components/ui/dropdown-menu"
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { format, parseISO } from "date-fns"
 import { cn } from "@/lib/utils"
 import type { TodoGroup, TodoItem, Project } from "@/lib/types"
 
@@ -79,6 +79,82 @@ function EditableText({
   )
 }
 
+function ProjectLinkDialog({
+  open,
+  onOpenChange,
+  projects,
+  currentProjectId,
+  onSelect,
+}: {
+  open: boolean
+  onOpenChange: (v: boolean) => void
+  projects: Project[]
+  currentProjectId?: string
+  onSelect: (projectId: string | undefined) => void
+}) {
+  const [search, setSearch] = useState("")
+
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase()
+    return [...projects]
+      .filter(p => !q || p.name.toLowerCase().includes(q) || p.description?.toLowerCase().includes(q))
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }))
+  }, [projects, search])
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { onOpenChange(v); if (!v) setSearch("") }}>
+      <DialogContent className="max-w-sm max-h-[70vh] overflow-hidden flex flex-col">
+        <DialogHeader className="shrink-0">
+          <DialogTitle>Link to project</DialogTitle>
+        </DialogHeader>
+        <div className="relative shrink-0">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            placeholder="Search projects…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="pl-10"
+            autoFocus
+          />
+        </div>
+        <div className="flex-1 min-h-0 overflow-y-auto space-y-1.5">
+          {filtered.length === 0 ? (
+            <p className="py-6 text-center text-sm text-muted-foreground">No projects found.</p>
+          ) : (
+            filtered.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => { onSelect(p.id); onOpenChange(false); setSearch("") }}
+                className="flex w-full items-center gap-3 rounded-lg border border-border bg-secondary/50 p-3 text-left hover:bg-secondary transition-colors"
+              >
+                <div className="h-3 w-3 rounded-full shrink-0" style={{ backgroundColor: p.color }} />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-foreground truncate">{p.name}</p>
+                  {p.description && <p className="text-xs text-muted-foreground truncate">{p.description}</p>}
+                </div>
+                {currentProjectId === p.id && <span className="text-xs text-accent">linked</span>}
+              </button>
+            ))
+          )}
+        </div>
+        {currentProjectId && (
+          <div className="shrink-0 pt-2 border-t border-border">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full text-muted-foreground gap-2"
+              onClick={() => { onSelect(undefined); onOpenChange(false) }}
+            >
+              <X className="h-3.5 w-3.5" />
+              Remove link
+            </Button>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 function TodoItemRow({
   item,
   onUpdate,
@@ -88,18 +164,29 @@ function TodoItemRow({
   onUpdate: (data: Partial<TodoItem>) => void
   onDelete: () => void
 }) {
+  const doneDate = item.doneAt
+    ? format(parseISO(item.doneAt), "dd.MM HH:mm")
+    : null
+
+  const sessionLabel = item.sessionSnapshot
+    ? `${format(parseISO(item.sessionSnapshot.date), "dd.MM")} ${item.sessionSnapshot.start}–${item.sessionSnapshot.end || "?"}`
+    : null
+
   return (
-    <div className="group flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-black/10 dark:hover:bg-white/5">
+    <div className="group flex items-start gap-2 rounded-md px-2 py-1.5 hover:bg-black/10 dark:hover:bg-white/5">
       <button
-        onClick={() => onUpdate({ done: !item.done })}
-        className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+        onClick={() => onUpdate({
+          done: !item.done,
+          doneAt: !item.done ? new Date().toISOString() : undefined,
+        })}
+        className="shrink-0 mt-0.5 text-muted-foreground hover:text-foreground transition-colors"
       >
         {item.done
           ? <CheckSquare className="h-4 w-4 text-accent" />
           : <Square className="h-4 w-4" />
         }
       </button>
-      <div className="flex-1 min-w-0">
+      <div className="flex-1 min-w-0 flex flex-col gap-0.5">
         <EditableText
           value={item.text}
           onSave={(text) => onUpdate({ text })}
@@ -109,11 +196,21 @@ function TodoItemRow({
           )}
           placeholder="Todo text"
         />
+        {item.done && (doneDate || sessionLabel) && (
+          <div className="flex items-center gap-2 flex-wrap">
+            {doneDate && (
+              <span className="text-[10px] text-muted-foreground/70">✓ {doneDate}</span>
+            )}
+            {sessionLabel && (
+              <span className="text-[10px] text-accent/70 bg-accent/10 rounded px-1 py-px">{sessionLabel}</span>
+            )}
+          </div>
+        )}
       </div>
       <Button
         variant="ghost"
         size="icon"
-        className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+        className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 mt-0.5"
         onClick={onDelete}
       >
         <Trash2 className="h-3.5 w-3.5 text-muted-foreground hover:text-destructive" />
@@ -172,8 +269,8 @@ function GroupCard({
   onAddItem,
   onUpdateItem,
   onDeleteItem,
-  accentClass,
-  borderClass,
+  accentBarClass,
+  cardClass,
 }: {
   group: TodoGroup
   projects: Project[]
@@ -182,15 +279,16 @@ function GroupCard({
   onAddItem: (text: string) => void
   onUpdateItem: (itemId: string, data: Partial<TodoItem>) => void
   onDeleteItem: (itemId: string) => void
-  accentClass: string
-  borderClass: string
+  accentBarClass: string
+  cardClass: string
 }) {
+  const [linkDialogOpen, setLinkDialogOpen] = useState(false)
   const doneCount = group.items.filter((i) => i.done).length
   const total = group.items.length
   const linkedProject = projects.find((p) => p.id === group.projectId)
 
   return (
-    <div className={cn("rounded-xl border bg-card p-4 flex flex-col gap-2", borderClass)}>
+    <div className={cn("rounded-xl border bg-card p-4 flex flex-col gap-2", cardClass)}>
       {/* Header */}
       <div className="flex items-start justify-between gap-2">
         <div className="flex flex-col gap-1 flex-1 min-w-0">
@@ -207,7 +305,6 @@ function GroupCard({
               </span>
             )}
           </div>
-          {/* Project link badge */}
           {linkedProject && (
             <div className="flex items-center gap-1">
               <div className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: linkedProject.color }} />
@@ -223,50 +320,26 @@ function GroupCard({
         </div>
 
         <div className="flex items-center gap-1 shrink-0">
-          {/* Link to project (work only) */}
           {group.type === 'work' && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className={cn("h-7 w-7", linkedProject ? "text-accent" : "text-muted-foreground")}
-                  title="Link to project"
-                >
-                  <Link className="h-3.5 w-3.5" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-52">
-                {projects.length === 0 ? (
-                  <DropdownMenuItem disabled>No projects</DropdownMenuItem>
-                ) : (
-                  <>
-                    {projects.map((p) => (
-                      <DropdownMenuItem
-                        key={p.id}
-                        onClick={() => onUpdateGroup({ projectId: p.id })}
-                        className="gap-2"
-                      >
-                        <div className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: p.color }} />
-                        <span className="truncate">{p.name}</span>
-                        {group.projectId === p.id && <span className="ml-auto text-accent">✓</span>}
-                      </DropdownMenuItem>
-                    ))}
-                    {group.projectId && (
-                      <>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem onClick={() => onUpdateGroup({ projectId: undefined })}>
-                          <X className="h-3.5 w-3.5 mr-2" />
-                          Remove link
-                        </DropdownMenuItem>
-                      </>
-                    )}
-                  </>
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <>
+              <Button
+                variant="ghost"
+                size="icon"
+                className={cn("h-7 w-7", linkedProject ? "text-accent" : "text-muted-foreground")}
+                title="Link to project"
+                onClick={() => setLinkDialogOpen(true)}
+              >
+                <Link className="h-3.5 w-3.5" />
+              </Button>
+              <ProjectLinkDialog
+                open={linkDialogOpen}
+                onOpenChange={setLinkDialogOpen}
+                projects={projects}
+                currentProjectId={group.projectId}
+                onSelect={(id) => onUpdateGroup({ projectId: id })}
+              />
+            </>
           )}
-          {/* Type toggle */}
           <Button
             variant="ghost"
             size="icon"
@@ -292,9 +365,9 @@ function GroupCard({
 
       {/* Progress bar */}
       {total > 0 && (
-        <div className="h-1 rounded-full bg-secondary overflow-hidden">
+        <div className="h-1.5 rounded-full bg-secondary overflow-hidden">
           <div
-            className={cn("h-full rounded-full transition-all", accentClass)}
+            className={cn("h-full rounded-full transition-all", accentBarClass)}
             style={{ width: `${(doneCount / total) * 100}%` }}
           />
         </div>
@@ -376,8 +449,8 @@ function Section({
   onUpdateItem,
   onDeleteItem,
   type,
-  accentClass,
-  borderClass,
+  accentBarClass,
+  cardClass,
   headerClass,
 }: {
   title: string
@@ -391,8 +464,8 @@ function Section({
   onUpdateItem: (groupId: string, itemId: string, data: Partial<TodoItem>) => void
   onDeleteItem: (groupId: string, itemId: string) => void
   type: 'work' | 'personal'
-  accentClass: string
-  borderClass: string
+  accentBarClass: string
+  cardClass: string
   headerClass: string
 }) {
   const totalItems = groups.reduce((s, g) => s + g.items.length, 0)
@@ -400,7 +473,7 @@ function Section({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className={cn("flex items-center gap-2 pb-2 border-b", headerClass)}>
+      <div className={cn("flex items-center gap-2 pb-3 border-b-2", headerClass)}>
         {icon}
         <h3 className="font-semibold text-foreground">{title}</h3>
         {totalItems > 0 && (
@@ -420,8 +493,8 @@ function Section({
             onAddItem={(text) => onAddItem(group.id, text)}
             onUpdateItem={(itemId, data) => onUpdateItem(group.id, itemId, data)}
             onDeleteItem={(itemId) => onDeleteItem(group.id, itemId)}
-            accentClass={accentClass}
-            borderClass={borderClass}
+            accentBarClass={accentBarClass}
+            cardClass={cardClass}
           />
         ))}
         <AddGroupRow onAdd={onAddGroup} type={type} />
@@ -447,7 +520,7 @@ export function TodosView({
     <div className="flex flex-col gap-10">
       <Section
         title="Work"
-        icon={<Briefcase className="h-4 w-4 text-accent" />}
+        icon={<Briefcase className="h-4 w-4 text-sky-400" />}
         groups={workGroups}
         projects={projects}
         onUpdateGroup={onUpdateGroup}
@@ -457,9 +530,9 @@ export function TodosView({
         onUpdateItem={onUpdateItem}
         onDeleteItem={onDeleteItem}
         type="work"
-        accentClass="bg-accent"
-        borderClass="border-border"
-        headerClass="border-accent/20"
+        accentBarClass="bg-sky-400"
+        cardClass="border-sky-500/40 bg-sky-500/5"
+        headerClass="border-sky-500/50"
       />
       <Section
         title="Personal"
@@ -473,9 +546,9 @@ export function TodosView({
         onUpdateItem={onUpdateItem}
         onDeleteItem={onDeleteItem}
         type="personal"
-        accentClass="bg-violet-400"
-        borderClass="border-violet-500/30"
-        headerClass="border-violet-500/20"
+        accentBarClass="bg-violet-400"
+        cardClass="border-violet-500/40 bg-violet-500/5"
+        headerClass="border-violet-500/50"
       />
     </div>
   )

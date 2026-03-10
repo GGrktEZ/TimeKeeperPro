@@ -104,6 +104,9 @@ export interface TodoItem {
   id: string
   text: string
   done: boolean
+  doneAt?: string
+  sessionId?: string
+  sessionSnapshot?: { date: string; start: string; end: string }
 }
 
 export interface TodoGroup {
