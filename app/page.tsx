@@ -7,8 +7,9 @@ import { DailyView } from "@/components/daily-view"
 import { ProjectsView } from "@/components/projects-view"
 import { StatsView } from "@/components/stats-view"
 import { DataView } from "@/components/data-view"
+import { TodosView } from "@/components/todos-view"
 import { UndoBar } from "@/components/undo-bar"
-import { useProjects, useDayEntries } from "@/lib/store"
+import { useProjects, useDayEntries, useTodos } from "@/lib/store"
 import { useUndo } from "@/lib/use-undo"
 import type { View, DayEntry, DayProjectEntry, Project } from "@/lib/types"
 
@@ -38,6 +39,16 @@ export default function HomePage() {
     importEntries,
     restoreEntries,
   } = useDayEntries()
+
+  const {
+    groups: todoGroups,
+    addGroup,
+    updateGroupName,
+    deleteGroup,
+    addItem,
+    updateItem,
+    deleteItem,
+  } = useTodos()
 
   const {
     canUndo,
@@ -222,6 +233,16 @@ export default function HomePage() {
           />
         ) : currentView === "stats" ? (
           <StatsView entries={entries} projects={projects} />
+        ) : currentView === "todos" ? (
+          <TodosView
+            groups={todoGroups}
+            onAddGroup={addGroup}
+            onUpdateGroupName={updateGroupName}
+            onDeleteGroup={deleteGroup}
+            onAddItem={addItem}
+            onUpdateItem={updateItem}
+            onDeleteItem={deleteItem}
+          />
         ) : (
           <DataView
             selectedDate={selectedDate}

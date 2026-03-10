@@ -1,10 +1,56 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import type { Project, DayEntry, DayProjectEntry, LocationBlock } from "./types"
+import type { Project, DayEntry, DayProjectEntry, LocationBlock, TodoGroup, TodoItem } from "./types"
 
 const PROJECTS_KEY = "timetrack-projects"
 const ENTRIES_KEY = "timetrack-entries"
+const TODOS_KEY = "timetrack-todos"
+
+// Initial seed from Todo.txt
+const INITIAL_TODOS: TodoGroup[] = [
+  {
+    id: "g1", name: "bildxzug semestergespräch",
+    items: [{ id: "i1", text: "add further todos.", done: false }],
+  },
+  {
+    id: "g2", name: "theia präsi",
+    items: [{ id: "i2", text: "throw tokens", done: false }],
+  },
+  {
+    id: "g3", name: "zahnärzte",
+    items: [
+      { id: "i3", text: "double opt in.", done: false },
+      { id: "i4", text: "customer insight journeys double opt in via email.", done: false },
+    ],
+  },
+  {
+    id: "g4", name: "Theia site",
+    items: [
+      { id: "i5", text: "Home site, Herausforderungen unserer Kunden -> Bilder gehen nicht", done: false },
+      { id: "i6", text: "check accessibility", done: false },
+    ],
+  },
+  {
+    id: "g5", name: "CAB",
+    items: [
+      { id: "i7", text: "Auf Replit clonen", done: false },
+      { id: "i8", text: "mehrtagige kürse: blockkurs autonomie bsv.", done: false },
+      { id: "i9", text: "all sync is double currently.", done: false },
+      { id: "i10", text: "Anmeldungen / Kurse automatisch syncen.", done: false },
+      { id: "i11", text: "dynamics trigger - customer journey: double opt in email chain.", done: false },
+      { id: "i12", text: "in dynamics marketing double opt in machen.", done: false },
+    ],
+  },
+  {
+    id: "g6", name: "doubletten",
+    items: [{ id: "i13", text: "mache tests und unit tests für klassen etc.", done: false }],
+  },
+  {
+    id: "g7", name: "mailchimp",
+    items: [{ id: "i14", text: "ask baki", done: false }],
+  },
+]
 
 function generateId(): string {
   return Math.random().toString(36).substring(2, 15) + Date.now().toString(36)
@@ -346,5 +392,94 @@ export function useDayEntries() {
         // ignore
       }
     }, []),
+  }
+}
+
+export function useTodos() {
+  const [groups, setGroups] = useState<TodoGroup[]>([])
+  const [isLoaded, setIsLoaded] = useState(false)
+
+  useEffect(() => {
+    const stored = localStorage.getItem(TODOS_KEY)
+    if (stored) {
+      try {
+        setGroups(JSON.parse(stored))
+      } catch {
+        setGroups(INITIAL_TODOS)
+      }
+    } else {
+      setGroups(INITIAL_TODOS)
+    }
+    setIsLoaded(true)
+  }, [])
+
+  useEffect(() => {
+    if (isLoaded) {
+      localStorage.setItem(TODOS_KEY, JSON.stringify(groups))
+    }
+  }, [groups, isLoaded])
+
+  const addGroup = useCallback((name: string) => {
+    setGroups((prev) => [
+      ...prev,
+      { id: generateId(), name, items: [] },
+    ])
+  }, [])
+
+  const updateGroupName = useCallback((groupId: string, name: string) => {
+    setGroups((prev) => prev.map((g) => g.id === groupId ? { ...g, name } : g))
+  }, [])
+
+  const deleteGroup = useCallback((groupId: string) => {
+    setGroups((prev) => prev.filter((g) => g.id !== groupId))
+  }, [])
+
+  const addItem = useCallback((groupId: string, text: string) => {
+    const newItem: TodoItem = { id: generateId(), text, done: false }
+    setGroups((prev) =>
+      prev.map((g) => g.id === groupId ? { ...g, items: [...g.items, newItem] } : g)
+    )
+  }, [])
+
+  const updateItem = useCallback((groupId: string, itemId: string, data: Partial<TodoItem>) => {
+    setGroups((prev) =>
+      prev.map((g) =>
+        g.id === groupId
+          ? { ...g, items: g.items.map((i) => i.id === itemId ? { ...i, ...data } : i) }
+          : g
+      )
+    )
+  }, [])
+
+  const deleteItem = useCallback((groupId: string, itemId: string) => {
+    setGroups((prev) =>
+      prev.map((g) =>
+        g.id === groupId ? { ...g, items: g.items.filter((i) => i.id !== itemId) } : g
+      )
+    )
+  }, [])
+
+  const moveItem = useCallback((groupId: string, fromIndex: number, toIndex: number) => {
+    setGroups((prev) =>
+      prev.map((g) => {
+        if (g.id !== groupId) return g
+        const items = [...g.items]
+        const [moved] = items.splice(fromIndex, 1)
+        items.splice(toIndex, 0, moved)
+        return { ...g, items }
+      })
+    )
+  }, [])
+
+  return {
+    groups,
+    isLoaded,
+    addGroup,
+    updateGroupName,
+    deleteGroup,
+    addItem,
+    updateItem,
+    deleteItem,
+    moveItem,
   }
 }

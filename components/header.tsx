@@ -1,6 +1,6 @@
 "use client"
 
-import { Clock, FolderKanban, BarChart3, Database } from "lucide-react"
+import { Clock, FolderKanban, BarChart3, Database, CheckSquare } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import type { View } from "@/lib/types"
 
@@ -54,6 +54,16 @@ export function Header({
             >
               <BarChart3 className="h-4 w-4" />
               <span className="hidden sm:inline">Stats</span>
+            </Button>
+
+            <Button
+              variant={currentView === "todos" ? "default" : "ghost"}
+              size="sm"
+              onClick={() => onViewChange("todos")}
+              className="gap-2"
+            >
+              <CheckSquare className="h-4 w-4" />
+              <span className="hidden sm:inline">Todos</span>
             </Button>
 
             <div className="mx-1 h-5 w-px bg-border" />

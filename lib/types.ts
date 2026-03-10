@@ -98,4 +98,16 @@ export interface DayEntry {
   updatedAt: string
 }
 
-export type View = 'daily' | 'projects' | 'stats' | 'data'
+export type View = 'daily' | 'projects' | 'stats' | 'todos' | 'data'
+
+export interface TodoItem {
+  id: string
+  text: string
+  done: boolean
+}
+
+export interface TodoGroup {
+  id: string
+  name: string
+  items: TodoItem[]
+}
