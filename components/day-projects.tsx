@@ -17,16 +17,18 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import type { Project, ProjectTask, DayProjectEntry, WorkSession } from "@/lib/types"
+import type { Project, ProjectTask, DayProjectEntry, WorkSession, TodoGroup, TodoItem } from "@/lib/types"
 import { timeDiffMinutes } from "@/lib/utils"
 
 interface DayProjectsProps {
   projects: Project[]
   dayProjects: DayProjectEntry[]
+  todoGroups: TodoGroup[]
   onAddProject: (projectId: string, taskId?: string) => void
   onUpdateProject: (projectEntryId: string, data: Partial<DayProjectEntry>) => void
   onRemoveProject: (projectEntryId: string) => void
   onReorderProjects: (fromIndex: number, toIndex: number) => void
+  onUpdateTodoItem: (groupId: string, itemId: string, data: Partial<TodoItem>) => void
 }
 
 function generateId(): string {
@@ -306,10 +308,12 @@ function WorkSessionItem({
 export function DayProjects({
   projects,
   dayProjects,
+  todoGroups,
   onAddProject,
   onUpdateProject,
   onRemoveProject,
   onReorderProjects,
+  onUpdateTodoItem,
 }: DayProjectsProps) {
   const getProject = (projectId: string) => projects.find((p) => p.id === projectId)
   const selectedProjectIds = dayProjects.map((dp) => dp.projectId)
@@ -426,6 +430,7 @@ export function DayProjects({
               const isActive = hasActiveSession(sessions)
               const isDragging = dragActiveIndex === index
               const isDropTarget = dropTargetIndex === index && dragActiveIndex !== null && dragActiveIndex !== index
+              const linkedTodoGroup = todoGroups.find((g) => g.projectId === project.id)
 
               return (
                 <div
@@ -557,6 +562,37 @@ export function DayProjects({
                           onUpdate={onUpdateProject}
                         />
                       ))}
+                    </div>
+                  )}
+
+                  {/* Linked Todos */}
+                  {linkedTodoGroup && linkedTodoGroup.items.length > 0 && (
+                    <div className="space-y-1.5 pt-1">
+                      <Label className="text-xs text-muted-foreground flex items-center gap-1">
+                        <ListTodo className="h-3 w-3" />
+                        Todos
+                        <span className="text-muted-foreground/60">
+                          ({linkedTodoGroup.items.filter(i => !i.done).length} open)
+                        </span>
+                      </Label>
+                      <div className="rounded-md border border-border/50 bg-background/30 px-1 py-1 space-y-0.5">
+                        {linkedTodoGroup.items.map((item) => (
+                          <div key={item.id} className="flex items-center gap-2 px-1.5 py-1 rounded hover:bg-secondary/50 group">
+                            <button
+                              onClick={() => onUpdateTodoItem(linkedTodoGroup.id, item.id, { done: !item.done })}
+                              className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+                            >
+                              {item.done
+                                ? <CheckCircle2 className="h-3.5 w-3.5 text-accent" />
+                                : <CheckCircle2 className="h-3.5 w-3.5 opacity-30" />
+                              }
+                            </button>
+                            <span className={`text-xs flex-1 ${item.done ? "line-through text-muted-foreground" : "text-foreground"}`}>
+                              {item.text}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   )}
                 </div>

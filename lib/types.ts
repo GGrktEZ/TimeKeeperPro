@@ -109,5 +109,7 @@ export interface TodoItem {
 export interface TodoGroup {
   id: string
   name: string
+  type: 'work' | 'personal'
+  projectId?: string
   items: TodoItem[]
 }

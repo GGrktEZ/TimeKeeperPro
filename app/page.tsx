@@ -43,7 +43,7 @@ export default function HomePage() {
   const {
     groups: todoGroups,
     addGroup,
-    updateGroupName,
+    updateGroup,
     deleteGroup,
     addItem,
     updateItem,
@@ -217,11 +217,13 @@ export default function HomePage() {
             entry={currentEntry}
             entries={entries}
             projects={projects}
+            todoGroups={todoGroups}
             onUpdateEntry={handleUpdateEntryWithSnapshot}
             onAddProject={handleAddProjectToDay}
             onUpdateProject={handleUpdateDayProject}
             onRemoveProject={handleRemoveDayProject}
             onReorderProjects={handleReorderProjects}
+            onUpdateTodoItem={updateItem}
           />
         ) : currentView === "projects" ? (
           <ProjectsView
@@ -236,8 +238,9 @@ export default function HomePage() {
         ) : currentView === "todos" ? (
           <TodosView
             groups={todoGroups}
+            projects={projects}
             onAddGroup={addGroup}
-            onUpdateGroupName={updateGroupName}
+            onUpdateGroup={updateGroup}
             onDeleteGroup={deleteGroup}
             onAddItem={addItem}
             onUpdateItem={updateItem}

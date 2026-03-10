@@ -29,6 +29,15 @@ export function Header({
 
           <nav className="flex items-center rounded-lg bg-secondary p-1">
             <Button
+              variant={currentView === "todos" ? "default" : "ghost"}
+              size="sm"
+              onClick={() => onViewChange("todos")}
+              className="gap-2"
+            >
+              <CheckSquare className="h-4 w-4" />
+              <span className="hidden sm:inline">Todos</span>
+            </Button>
+            <Button
               variant={currentView === "daily" ? "default" : "ghost"}
               size="sm"
               onClick={() => onViewChange("daily")}
@@ -54,16 +63,6 @@ export function Header({
             >
               <BarChart3 className="h-4 w-4" />
               <span className="hidden sm:inline">Stats</span>
-            </Button>
-
-            <Button
-              variant={currentView === "todos" ? "default" : "ghost"}
-              size="sm"
-              onClick={() => onViewChange("todos")}
-              className="gap-2"
-            >
-              <CheckSquare className="h-4 w-4" />
-              <span className="hidden sm:inline">Todos</span>
             </Button>
 
             <div className="mx-1 h-5 w-px bg-border" />

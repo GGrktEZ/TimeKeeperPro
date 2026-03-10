@@ -10,29 +10,29 @@ const TODOS_KEY = "timetrack-todos"
 // Initial seed from Todo.txt
 const INITIAL_TODOS: TodoGroup[] = [
   {
-    id: "g1", name: "bildxzug semestergespräch",
+    id: "g1", name: "bildxzug semestergespräch", type: "work",
     items: [{ id: "i1", text: "add further todos.", done: false }],
   },
   {
-    id: "g2", name: "theia präsi",
+    id: "g2", name: "theia präsi", type: "work",
     items: [{ id: "i2", text: "throw tokens", done: false }],
   },
   {
-    id: "g3", name: "zahnärzte",
+    id: "g3", name: "zahnärzte", type: "work",
     items: [
       { id: "i3", text: "double opt in.", done: false },
       { id: "i4", text: "customer insight journeys double opt in via email.", done: false },
     ],
   },
   {
-    id: "g4", name: "Theia site",
+    id: "g4", name: "Theia site", type: "work",
     items: [
       { id: "i5", text: "Home site, Herausforderungen unserer Kunden -> Bilder gehen nicht", done: false },
       { id: "i6", text: "check accessibility", done: false },
     ],
   },
   {
-    id: "g5", name: "CAB",
+    id: "g5", name: "CAB", type: "work",
     items: [
       { id: "i7", text: "Auf Replit clonen", done: false },
       { id: "i8", text: "mehrtagige kürse: blockkurs autonomie bsv.", done: false },
@@ -43,11 +43,11 @@ const INITIAL_TODOS: TodoGroup[] = [
     ],
   },
   {
-    id: "g6", name: "doubletten",
+    id: "g6", name: "doubletten", type: "work",
     items: [{ id: "i13", text: "mache tests und unit tests für klassen etc.", done: false }],
   },
   {
-    id: "g7", name: "mailchimp",
+    id: "g7", name: "mailchimp", type: "work",
     items: [{ id: "i14", text: "ask baki", done: false }],
   },
 ]
@@ -403,7 +403,10 @@ export function useTodos() {
     const stored = localStorage.getItem(TODOS_KEY)
     if (stored) {
       try {
-        setGroups(JSON.parse(stored))
+        const parsed: TodoGroup[] = JSON.parse(stored)
+        // Migrate old groups that don't have a type field
+        const migrated = parsed.map((g) => ({ ...g, type: g.type ?? "work" as const }))
+        setGroups(migrated)
       } catch {
         setGroups(INITIAL_TODOS)
       }
@@ -419,15 +422,15 @@ export function useTodos() {
     }
   }, [groups, isLoaded])
 
-  const addGroup = useCallback((name: string) => {
+  const addGroup = useCallback((name: string, type: 'work' | 'personal' = 'work') => {
     setGroups((prev) => [
       ...prev,
-      { id: generateId(), name, items: [] },
+      { id: generateId(), name, type, items: [] },
     ])
   }, [])
 
-  const updateGroupName = useCallback((groupId: string, name: string) => {
-    setGroups((prev) => prev.map((g) => g.id === groupId ? { ...g, name } : g))
+  const updateGroup = useCallback((groupId: string, data: Partial<Pick<TodoGroup, 'name' | 'type' | 'projectId'>>) => {
+    setGroups((prev) => prev.map((g) => g.id === groupId ? { ...g, ...data } : g))
   }, [])
 
   const deleteGroup = useCallback((groupId: string) => {
@@ -475,7 +478,7 @@ export function useTodos() {
     groups,
     isLoaded,
     addGroup,
-    updateGroupName,
+    updateGroup,
     deleteGroup,
     addItem,
     updateItem,

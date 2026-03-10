@@ -4,7 +4,7 @@ import { format, parseISO } from "date-fns"
 import { DateSelector } from "./date-selector"
 import { TimeEntry } from "./time-entry"
 import { DayProjects } from "./day-projects"
-import type { Project, DayEntry, DayProjectEntry } from "@/lib/types"
+import type { Project, DayEntry, DayProjectEntry, TodoGroup, TodoItem } from "@/lib/types"
 
 interface DailyViewProps {
   selectedDate: string
@@ -12,11 +12,13 @@ interface DailyViewProps {
   entry: DayEntry | undefined
   entries: DayEntry[]
   projects: Project[]
+  todoGroups: TodoGroup[]
   onUpdateEntry: (data: Partial<DayEntry>) => void
   onAddProject: (projectId: string, taskId?: string) => void
   onUpdateProject: (projectEntryId: string, data: Partial<DayProjectEntry>) => void
   onRemoveProject: (projectEntryId: string) => void
   onReorderProjects: (fromIndex: number, toIndex: number) => void
+  onUpdateTodoItem: (groupId: string, itemId: string, data: Partial<TodoItem>) => void
 }
 
 export function DailyView({
@@ -25,11 +27,13 @@ export function DailyView({
   entry,
   entries,
   projects,
+  todoGroups,
   onUpdateEntry,
   onAddProject,
   onUpdateProject,
   onRemoveProject,
   onReorderProjects,
+  onUpdateTodoItem,
 }: DailyViewProps) {
   return (
     <div className="space-y-6">
@@ -54,10 +58,12 @@ export function DailyView({
         <DayProjects
           projects={projects}
           dayProjects={entry?.projects ?? []}
+          todoGroups={todoGroups}
           onAddProject={onAddProject}
           onUpdateProject={onUpdateProject}
           onRemoveProject={onRemoveProject}
           onReorderProjects={onReorderProjects}
+          onUpdateTodoItem={onUpdateTodoItem}
         />
       </div>
     </div>
