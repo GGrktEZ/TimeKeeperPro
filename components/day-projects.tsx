@@ -611,51 +611,59 @@ export function DayProjects({
                                 {item.text}
                               </span>
                               {/* Session badge / picker */}
-                              <DropdownMenu>
-                                <DropdownMenuTrigger asChild>
-                                  <button className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] tabular-nums transition-colors ${
-                                    linkedSession
-                                      ? "bg-accent/20 text-accent hover:bg-accent/30"
-                                      : "opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground"
-                                  }`}>
-                                    {linkedSession
-                                      ? `S${sessionIndex + 1} · ${linkedSession.start}${linkedSession.end ? `–${linkedSession.end}` : ""}`
-                                      : "assign"
-                                    }
-                                  </button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent align="end" className="w-48">
-                                  <DropdownMenuLabel className="text-xs text-muted-foreground font-normal">Assign to session</DropdownMenuLabel>
-                                  {sessions.filter(s => s.start).map((s, si) => (
-                                    <DropdownMenuItem
-                                      key={s.id}
-                                      onClick={() => onUpdateTodoItem(linkedTodoGroup.id, item.id, {
-                                        sessionId: s.id,
-                                        sessionSnapshot: { date: selectedDate, start: s.start, end: s.end },
-                                      })}
-                                      className="gap-2 text-xs"
-                                    >
-                                      <span className="text-muted-foreground w-4">S{si + 1}</span>
-                                      <span>{s.start}{s.end ? `–${s.end}` : " (active)"}</span>
-                                      {item.sessionId === s.id && <Check className="h-3 w-3 ml-auto text-accent" />}
-                                    </DropdownMenuItem>
-                                  ))}
-                                  {item.sessionId && (
-                                    <>
-                                      <DropdownMenuSeparator />
+                              {item.done ? (
+                                linkedSession && (
+                                  <span className="shrink-0 rounded px-1.5 py-0.5 text-[10px] tabular-nums bg-accent/20 text-accent">
+                                    {`S${sessionIndex + 1} · ${linkedSession.start}${linkedSession.end ? `–${linkedSession.end}` : ""}`}
+                                  </span>
+                                )
+                              ) : (
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <button className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] tabular-nums transition-colors ${
+                                      linkedSession
+                                        ? "bg-accent/20 text-accent hover:bg-accent/30"
+                                        : "opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground"
+                                    }`}>
+                                      {linkedSession
+                                        ? `S${sessionIndex + 1} · ${linkedSession.start}${linkedSession.end ? `–${linkedSession.end}` : ""}`
+                                        : "assign"
+                                      }
+                                    </button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end" className="w-48">
+                                    <DropdownMenuLabel className="text-xs text-muted-foreground font-normal">Assign to session</DropdownMenuLabel>
+                                    {sessions.filter(s => s.start).map((s, si) => (
                                       <DropdownMenuItem
-                                        onClick={() => onUpdateTodoItem(linkedTodoGroup.id, item.id, { sessionId: undefined, sessionSnapshot: undefined })}
-                                        className="text-xs text-muted-foreground"
+                                        key={s.id}
+                                        onClick={() => onUpdateTodoItem(linkedTodoGroup.id, item.id, {
+                                          sessionId: s.id,
+                                          sessionSnapshot: { date: selectedDate, start: s.start, end: s.end },
+                                        })}
+                                        className="gap-2 text-xs"
                                       >
-                                        Remove assignment
+                                        <span className="text-muted-foreground w-4">S{si + 1}</span>
+                                        <span>{s.start}{s.end ? `–${s.end}` : " (active)"}</span>
+                                        {item.sessionId === s.id && <Check className="h-3 w-3 ml-auto text-accent" />}
                                       </DropdownMenuItem>
-                                    </>
-                                  )}
-                                  {sessions.filter(s => s.start).length === 0 && (
-                                    <DropdownMenuItem disabled className="text-xs">No sessions yet</DropdownMenuItem>
-                                  )}
-                                </DropdownMenuContent>
-                              </DropdownMenu>
+                                    ))}
+                                    {item.sessionId && (
+                                      <>
+                                        <DropdownMenuSeparator />
+                                        <DropdownMenuItem
+                                          onClick={() => onUpdateTodoItem(linkedTodoGroup.id, item.id, { sessionId: undefined, sessionSnapshot: undefined })}
+                                          className="text-xs text-muted-foreground"
+                                        >
+                                          Remove assignment
+                                        </DropdownMenuItem>
+                                      </>
+                                    )}
+                                    {sessions.filter(s => s.start).length === 0 && (
+                                      <DropdownMenuItem disabled className="text-xs">No sessions yet</DropdownMenuItem>
+                                    )}
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
+                              )}
                             </div>
                           )
                         })}
