@@ -149,12 +149,14 @@ function WorkSessionItem({
   index,
   projectEntryId,
   sessions,
+  assignedTodos,
   onUpdate,
 }: {
   session: WorkSession
   index: number
   projectEntryId: string
   sessions: WorkSession[]
+  assignedTodos: TodoItem[]
   onUpdate: (projectEntryId: string, data: Partial<DayProjectEntry>) => void
 }) {
   const [isExpanded, setIsExpanded] = useState(false)
@@ -182,7 +184,7 @@ function WorkSessionItem({
     onUpdate(projectEntryId, { workSessions: updatedSessions, hoursWorked })
   }
 
-  const hasNotes = (session.doneNotes && session.doneNotes.trim()) || (session.todoNotes && session.todoNotes.trim())
+  const hasNotes = assignedTodos.length > 0 || (session.todoNotes && session.todoNotes.trim())
 
   return (
     <div
@@ -269,31 +271,36 @@ function WorkSessionItem({
       {isExpanded && (
         <div className="border-t border-border/30 p-3">
           <div className="grid gap-3 md:grid-cols-2">
-            {/* Done Section */}
+            {/* Todos Done Section */}
             <div className="space-y-1.5">
               <Label className="flex items-center gap-1.5 text-xs font-medium text-emerald-400">
                 <CheckCircle2 className="h-3 w-3" />
-                Done
+                Todos Done
               </Label>
-              <div className="rounded-md border border-emerald-500/30 bg-emerald-500/5">
-                <AutoResizeTextarea
-                  placeholder="What did you complete in this session?"
-                  value={session.doneNotes ?? ""}
-                  onChange={(value) => updateSession("doneNotes", value)}
-                  className="min-h-[80px] w-full resize-none border-0 bg-transparent px-2.5 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-0"
-                />
+              <div className="rounded-md border border-emerald-500/30 bg-emerald-500/5 min-h-[80px] px-2.5 py-2">
+                {assignedTodos.length === 0 ? (
+                  <p className="text-xs text-muted-foreground/40">No todos assigned to this session.</p>
+                ) : (
+                  <ul className="space-y-1.5">
+                    {assignedTodos.map((todo) => (
+                      <li key={todo.id} className="flex items-start gap-1.5 text-xs text-foreground">
+                        <CheckCircle2 className="h-3 w-3 text-emerald-400 shrink-0 mt-px" />
+                        <span>{todo.text}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
             </div>
 
-            {/* To Do Section */}
+            {/* Notizen Section */}
             <div className="space-y-1.5">
-              <Label className="flex items-center gap-1.5 text-xs font-medium text-amber-400">
-                <ListTodo className="h-3 w-3" />
-                To Do
+              <Label className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                Notizen
               </Label>
-              <div className="rounded-md border border-amber-500/30 bg-amber-500/5">
+              <div className="rounded-md border border-border/50 bg-background/20">
                 <AutoResizeTextarea
-                  placeholder="What still needs to be done?"
+                  placeholder="Notizen…"
                   value={session.todoNotes ?? ""}
                   onChange={(value) => updateSession("todoNotes", value)}
                   className="min-h-[80px] w-full resize-none border-0 bg-transparent px-2.5 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-0"
@@ -562,6 +569,7 @@ export function DayProjects({
                           index={index}
                           projectEntryId={dayProject.id}
                           sessions={sessions}
+                          assignedTodos={linkedTodoGroup ? linkedTodoGroup.items.filter(item => item.sessionId === session.id) : []}
                           onUpdate={onUpdateProject}
                         />
                       ))}
