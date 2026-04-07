@@ -134,7 +134,7 @@ export default function HomePage() {
 
   const handleAutoWeekly = useCallback(() => {
     const interneAdminProject = projects.find(
-      (project) => project.name.trim().toLowerCase() === "ip - interne admin"
+      (project) => project.name.trim().toLowerCase() === "ip - weekly"
     )
     if (!interneAdminProject) return
 

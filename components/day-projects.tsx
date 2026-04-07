@@ -367,7 +367,7 @@ export function DayProjects({
   const selectedProjectIds = dayProjects.map((dp) => dp.projectId)
   const isTuesday = getDay(parseISO(selectedDate)) === 2
   const hasInterneAdminProject = projects.some(
-    (project) => project.name.trim().toLowerCase() === "ip - interne admin"
+    (project) => project.name.trim().toLowerCase() === "ip - weekly"
   )
 
   // Drag-and-drop state
@@ -486,7 +486,7 @@ export function DayProjects({
                 onClick={onAutoWeekly}
                 disabled={!hasInterneAdminProject}
                 className="h-8 text-xs"
-                title={!hasInterneAdminProject ? "Project 'IP - Interne Admin' not found" : undefined}
+                title={!hasInterneAdminProject ? "Project 'IP - Weekly' not found" : undefined}
               >
                 Auto Weekly
               </Button>
