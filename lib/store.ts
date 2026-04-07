@@ -405,7 +405,19 @@ export function useTodos() {
       try {
         const parsed: TodoGroup[] = JSON.parse(stored)
         // Migrate old groups that don't have a type field
-        const migrated = parsed.map((g) => ({ ...g, type: g.type ?? "work" as const }))
+        const migrated = parsed.map((g) => ({
+          ...g,
+          type: g.type ?? "work" as const,
+          items: (g.items ?? []).map((item) => ({
+            ...item,
+            assignedSessionIds:
+              item.assignedSessionIds ??
+              (item.sessionId ? [item.sessionId] : []),
+            completedSessionId: item.completedSessionId ?? item.sessionId,
+            completedSessionSnapshot:
+              item.completedSessionSnapshot ?? item.sessionSnapshot,
+          })),
+        }))
         setGroups(migrated)
       } catch {
         setGroups(INITIAL_TODOS)

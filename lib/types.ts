@@ -105,6 +105,10 @@ export interface TodoItem {
   text: string
   done: boolean
   doneAt?: string
+  assignedSessionIds?: string[]
+  completedSessionId?: string
+  completedSessionSnapshot?: { date: string; start: string; end: string }
+  // Legacy fields kept for backwards compatibility with older saved data.
   sessionId?: string
   sessionSnapshot?: { date: string; start: string; end: string }
 }

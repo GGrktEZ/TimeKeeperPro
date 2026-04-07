@@ -168,8 +168,9 @@ function TodoItemRow({
     ? format(parseISO(item.doneAt), "dd.MM HH:mm")
     : null
 
-  const sessionLabel = item.sessionSnapshot
-    ? `${format(parseISO(item.sessionSnapshot.date), "dd.MM")} ${item.sessionSnapshot.start}–${item.sessionSnapshot.end || "?"}`
+  const completionSnapshot = item.completedSessionSnapshot ?? item.sessionSnapshot
+  const sessionLabel = completionSnapshot
+    ? `${format(parseISO(completionSnapshot.date), "dd.MM")} ${completionSnapshot.start}–${completionSnapshot.end || "?"}`
     : null
 
   return (

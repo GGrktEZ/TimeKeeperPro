@@ -4,6 +4,7 @@ import React from "react"
 
 import { Trash2, FolderKanban, Clock, Plus, Play, Square, CheckCircle2, ListTodo, ChevronDown, ChevronUp, GripVertical, Check } from "lucide-react"
 import { useState, useEffect, useRef, useCallback } from "react"
+import { getDay, parseISO } from "date-fns"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -19,7 +20,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import type { Project, ProjectTask, DayProjectEntry, WorkSession, TodoGroup, TodoItem } from "@/lib/types"
-import { timeDiffMinutes } from "@/lib/utils"
+import { finalizeTimeInput, normalizeTimeInput, timeDiffMinutes } from "@/lib/utils"
 
 interface DayProjectsProps {
   projects: Project[]
@@ -27,6 +28,7 @@ interface DayProjectsProps {
   todoGroups: TodoGroup[]
   selectedDate: string
   onAddProject: (projectId: string, taskId?: string) => void
+  onAutoWeekly: () => void
   onUpdateProject: (projectEntryId: string, data: Partial<DayProjectEntry>) => void
   onRemoveProject: (projectEntryId: string) => void
   onReorderProjects: (fromIndex: number, toIndex: number) => void
@@ -80,6 +82,17 @@ function minutesToString(minutes: number): string {
   if (h > 0 && m > 0) return `${h}h ${m}m`
   if (h > 0) return `${h}h`
   return `${m}m`
+}
+
+function getAssignedSessionIds(item: TodoItem): string[] {
+  if (item.assignedSessionIds && item.assignedSessionIds.length > 0) {
+    return item.assignedSessionIds
+  }
+  return item.sessionId ? [item.sessionId] : []
+}
+
+function getCompletedSessionId(item: TodoItem): string | undefined {
+  return item.completedSessionId ?? item.sessionId
 }
 
 function LiveSessionTimer({ session }: { session: WorkSession }) {
@@ -150,6 +163,7 @@ function WorkSessionItem({
   projectEntryId,
   sessions,
   assignedTodos,
+  onDropTodo,
   onUpdate,
 }: {
   session: WorkSession
@@ -157,6 +171,7 @@ function WorkSessionItem({
   projectEntryId: string
   sessions: WorkSession[]
   assignedTodos: TodoItem[]
+  onDropTodo: (sessionId: string, payload: { groupId: string; itemId: string }) => void
   onUpdate: (projectEntryId: string, data: Partial<DayProjectEntry>) => void
 }) {
   const [isExpanded, setIsExpanded] = useState(false)
@@ -210,7 +225,8 @@ function WorkSessionItem({
               type="text"
               inputMode="numeric"
               value={session.start}
-              onChange={(e) => updateSession("start", e.target.value)}
+              onChange={(e) => updateSession("start", normalizeTimeInput(e.target.value))}
+              onBlur={(e) => updateSession("start", finalizeTimeInput(e.target.value))}
               className="h-8 text-sm tabular-nums"
               placeholder="HH:MM"
               maxLength={5}
@@ -230,7 +246,8 @@ function WorkSessionItem({
               type="text"
               inputMode="numeric"
               value={session.end}
-              onChange={(e) => updateSession("end", e.target.value)}
+              onChange={(e) => updateSession("end", normalizeTimeInput(e.target.value))}
+              onBlur={(e) => updateSession("end", finalizeTimeInput(e.target.value))}
               className="h-8 text-sm tabular-nums"
               placeholder="HH:MM"
               maxLength={5}
@@ -278,6 +295,25 @@ function WorkSessionItem({
                 Todos Done
               </Label>
               <div className="rounded-md border border-emerald-500/30 bg-emerald-500/5 min-h-[80px] px-2.5 py-2">
+                <div
+                  className="min-h-[64px]"
+                  onDragOver={(e) => {
+                    e.preventDefault()
+                    e.dataTransfer.dropEffect = "move"
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault()
+                    const raw = e.dataTransfer.getData("application/x-timekeeper-todo")
+                    if (!raw) return
+                    try {
+                      const parsed = JSON.parse(raw) as { groupId: string; itemId: string }
+                      if (!parsed.groupId || !parsed.itemId) return
+                      onDropTodo(session.id, parsed)
+                    } catch {
+                      // Ignore malformed drag payloads.
+                    }
+                  }}
+                >
                 {assignedTodos.length === 0 ? (
                   <p className="text-xs text-muted-foreground/40">No todos assigned to this session.</p>
                 ) : (
@@ -290,6 +326,7 @@ function WorkSessionItem({
                     ))}
                   </ul>
                 )}
+                </div>
               </div>
             </div>
 
@@ -320,6 +357,7 @@ export function DayProjects({
   todoGroups,
   selectedDate,
   onAddProject,
+  onAutoWeekly,
   onUpdateProject,
   onRemoveProject,
   onReorderProjects,
@@ -327,6 +365,10 @@ export function DayProjects({
 }: DayProjectsProps) {
   const getProject = (projectId: string) => projects.find((p) => p.id === projectId)
   const selectedProjectIds = dayProjects.map((dp) => dp.projectId)
+  const isTuesday = getDay(parseISO(selectedDate)) === 2
+  const hasInterneAdminProject = projects.some(
+    (project) => project.name.trim().toLowerCase() === "ip - interne admin"
+  )
 
   // Drag-and-drop state
   const dragItemIndex = useRef<number | null>(null)
@@ -404,6 +446,30 @@ export function DayProjects({
     onUpdateProject(projectEntryId, { workSessions: updatedSessions, hoursWorked })
   }
 
+  const assignTodoToSession = (
+    groupId: string,
+    item: TodoItem,
+    session: WorkSession,
+    completeInSession: boolean
+  ) => {
+    const assignedSessionIds = getAssignedSessionIds(item)
+    const nextAssignedSessionIds = assignedSessionIds.includes(session.id)
+      ? assignedSessionIds
+      : [...assignedSessionIds, session.id]
+
+    onUpdateTodoItem(groupId, item.id, {
+      assignedSessionIds: nextAssignedSessionIds,
+      done: completeInSession ? true : item.done,
+      doneAt: completeInSession ? new Date().toISOString() : item.doneAt,
+      completedSessionId: completeInSession
+        ? session.id
+        : (item.completedSessionId ?? item.sessionId),
+      completedSessionSnapshot: completeInSession
+        ? { date: selectedDate, start: session.start, end: session.end }
+        : (item.completedSessionSnapshot ?? item.sessionSnapshot),
+    })
+  }
+
   return (
     <Card>
       <CardHeader className="pb-4">
@@ -412,11 +478,25 @@ export function DayProjects({
             <FolderKanban className="h-4 w-4 text-accent" />
             {"Today's Projects"}
           </CardTitle>
-          <ProjectSelector
-            projects={projects}
-            selectedProjectIds={selectedProjectIds}
-            onSelectProject={(projectId, taskId) => onAddProject(projectId, taskId)}
-          />
+          <div className="flex items-center gap-2">
+            {isTuesday && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={onAutoWeekly}
+                disabled={!hasInterneAdminProject}
+                className="h-8 text-xs"
+                title={!hasInterneAdminProject ? "Project 'IP - Interne Admin' not found" : undefined}
+              >
+                Auto Weekly
+              </Button>
+            )}
+            <ProjectSelector
+              projects={projects}
+              selectedProjectIds={selectedProjectIds}
+              onSelectProject={(projectId, taskId) => onAddProject(projectId, taskId)}
+            />
+          </div>
         </div>
       </CardHeader>
       <CardContent>
@@ -569,7 +649,14 @@ export function DayProjects({
                           index={index}
                           projectEntryId={dayProject.id}
                           sessions={sessions}
-                          assignedTodos={linkedTodoGroup ? linkedTodoGroup.items.filter(item => item.sessionId === session.id) : []}
+                          assignedTodos={linkedTodoGroup ? linkedTodoGroup.items.filter((item) => getCompletedSessionId(item) === session.id) : []}
+                          onDropTodo={(sessionId, payload) => {
+                            if (!linkedTodoGroup || payload.groupId !== linkedTodoGroup.id) return
+                            const targetSession = sessions.find((s) => s.id === sessionId)
+                            const todo = linkedTodoGroup.items.find((i) => i.id === payload.itemId)
+                            if (!targetSession || !todo) return
+                            assignTodoToSession(linkedTodoGroup.id, todo, targetSession, true)
+                          }}
                           onUpdate={onUpdateProject}
                         />
                       ))}
@@ -589,23 +676,42 @@ export function DayProjects({
                       <div className="rounded-md border border-border/50 bg-background/30 px-1 py-1 space-y-0.5">
                         {linkedTodoGroup.items.map((item) => {
                           const activeSession = sessions.find(s => s.start && !s.end)
-                          const linkedSession = item.sessionId ? sessions.find(s => s.id === item.sessionId) : null
-                          const sessionIndex = item.sessionId ? sessions.findIndex(s => s.id === item.sessionId) : -1
+                          const completedSessionId = getCompletedSessionId(item)
+                          const completedSession = completedSessionId ? sessions.find(s => s.id === completedSessionId) : null
+                          const completedSessionIndex = completedSessionId ? sessions.findIndex(s => s.id === completedSessionId) : -1
+                          const assignedSessionIds = getAssignedSessionIds(item)
+                          const assignedSessions = sessions.filter((s) => assignedSessionIds.includes(s.id))
 
                           const handleToggleDone = () => {
                             const nowDone = !item.done
+                            const preferredCompletedSession = activeSession
+                              ?? completedSession
+                              ?? sessions.find((s) => assignedSessionIds.includes(s.id))
                             onUpdateTodoItem(linkedTodoGroup.id, item.id, {
                               done: nowDone,
                               doneAt: nowDone ? new Date().toISOString() : undefined,
-                              sessionId: nowDone && activeSession ? activeSession.id : (nowDone ? item.sessionId : undefined),
-                              sessionSnapshot: nowDone && activeSession
-                                ? { date: selectedDate, start: activeSession.start, end: activeSession.end }
-                                : (nowDone && item.sessionSnapshot ? item.sessionSnapshot : undefined),
+                              completedSessionId: nowDone && preferredCompletedSession
+                                ? preferredCompletedSession.id
+                                : undefined,
+                              completedSessionSnapshot: nowDone && preferredCompletedSession
+                                ? { date: selectedDate, start: preferredCompletedSession.start, end: preferredCompletedSession.end }
+                                : undefined,
                             })
                           }
 
                           return (
-                            <div key={item.id} className="flex items-center gap-2 px-1.5 py-1 rounded hover:bg-secondary/50 group">
+                            <div
+                              key={item.id}
+                              className="flex items-center gap-2 px-1.5 py-1 rounded hover:bg-secondary/50 group"
+                              draggable
+                              onDragStart={(e) => {
+                                e.dataTransfer.setData(
+                                  "application/x-timekeeper-todo",
+                                  JSON.stringify({ groupId: linkedTodoGroup.id, itemId: item.id })
+                                )
+                                e.dataTransfer.effectAllowed = "move"
+                              }}
+                            >
                               <button
                                 onClick={handleToggleDone}
                                 className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
@@ -620,49 +726,55 @@ export function DayProjects({
                               </span>
                               {/* Session badge / picker */}
                               {item.done ? (
-                                linkedSession && (
+                                completedSession && (
                                   <span className="shrink-0 rounded px-1.5 py-0.5 text-[10px] tabular-nums bg-accent/20 text-accent">
-                                    {`S${sessionIndex + 1} · ${linkedSession.start}${linkedSession.end ? `–${linkedSession.end}` : ""}`}
+                                    {`Done S${completedSessionIndex + 1} · ${completedSession.start}${completedSession.end ? `–${completedSession.end}` : ""}`}
                                   </span>
                                 )
                               ) : (
                                 <DropdownMenu>
                                   <DropdownMenuTrigger asChild>
                                     <button className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] tabular-nums transition-colors ${
-                                      linkedSession
+                                      assignedSessions.length > 0
                                         ? "bg-accent/20 text-accent hover:bg-accent/30"
                                         : "opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground"
                                     }`}>
-                                      {linkedSession
-                                        ? `S${sessionIndex + 1} · ${linkedSession.start}${linkedSession.end ? `–${linkedSession.end}` : ""}`
+                                      {assignedSessions.length > 0
+                                        ? `${assignedSessions.length} sessions`
                                         : "assign"
                                       }
                                     </button>
                                   </DropdownMenuTrigger>
                                   <DropdownMenuContent align="end" className="w-48">
-                                    <DropdownMenuLabel className="text-xs text-muted-foreground font-normal">Assign to session</DropdownMenuLabel>
+                                    <DropdownMenuLabel className="text-xs text-muted-foreground font-normal">Assign sessions</DropdownMenuLabel>
                                     {sessions.filter(s => s.start).map((s, si) => (
                                       <DropdownMenuItem
                                         key={s.id}
-                                        onClick={() => onUpdateTodoItem(linkedTodoGroup.id, item.id, {
-                                          sessionId: s.id,
-                                          sessionSnapshot: { date: selectedDate, start: s.start, end: s.end },
-                                        })}
+                                        onClick={() => {
+                                          const currentAssignedSessionIds = getAssignedSessionIds(item)
+                                          const hasSession = currentAssignedSessionIds.includes(s.id)
+                                          const nextAssignedSessionIds = hasSession
+                                            ? currentAssignedSessionIds.filter((id) => id !== s.id)
+                                            : [...currentAssignedSessionIds, s.id]
+                                          onUpdateTodoItem(linkedTodoGroup.id, item.id, {
+                                            assignedSessionIds: nextAssignedSessionIds,
+                                          })
+                                        }}
                                         className="gap-2 text-xs"
                                       >
                                         <span className="text-muted-foreground w-4">S{si + 1}</span>
                                         <span>{s.start}{s.end ? `–${s.end}` : " (active)"}</span>
-                                        {item.sessionId === s.id && <Check className="h-3 w-3 ml-auto text-accent" />}
+                                        {assignedSessionIds.includes(s.id) && <Check className="h-3 w-3 ml-auto text-accent" />}
                                       </DropdownMenuItem>
                                     ))}
-                                    {item.sessionId && (
+                                    {assignedSessionIds.length > 0 && (
                                       <>
                                         <DropdownMenuSeparator />
                                         <DropdownMenuItem
-                                          onClick={() => onUpdateTodoItem(linkedTodoGroup.id, item.id, { sessionId: undefined, sessionSnapshot: undefined })}
+                                          onClick={() => onUpdateTodoItem(linkedTodoGroup.id, item.id, { assignedSessionIds: [] })}
                                           className="text-xs text-muted-foreground"
                                         >
-                                          Remove assignment
+                                          Clear assignments
                                         </DropdownMenuItem>
                                       </>
                                     )}

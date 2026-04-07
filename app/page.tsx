@@ -13,6 +13,10 @@ import { useProjects, useDayEntries, useTodos } from "@/lib/store"
 import { useUndo } from "@/lib/use-undo"
 import type { View, DayEntry, DayProjectEntry, Project } from "@/lib/types"
 
+function generateId(): string {
+  return Math.random().toString(36).substring(2, 15) + Date.now().toString(36)
+}
+
 export default function HomePage() {
   const [currentView, setCurrentView] = useState<View>("daily")
   const [selectedDate, setSelectedDate] = useState(() => format(new Date(), "yyyy-MM-dd"))
@@ -128,6 +132,73 @@ export default function HomePage() {
     [selectedDate, reorderDayProjects, snapshot]
   )
 
+  const handleAutoWeekly = useCallback(() => {
+    const interneAdminProject = projects.find(
+      (project) => project.name.trim().toLowerCase() === "ip - interne admin"
+    )
+    if (!interneAdminProject) return
+
+    snapshot("Auto add weekly meetings")
+
+    const weeklySessions = [
+      { start: "10:30", end: "11:00" },
+      { start: "11:00", end: "11:30" },
+    ]
+
+    const existingProjects = currentEntry?.projects ?? []
+    const existingInterneAdmin = existingProjects.find(
+      (projectEntry) => projectEntry.projectId === interneAdminProject.id
+    )
+
+    const existingSessions = existingInterneAdmin?.workSessions ?? []
+    const missingSessions = weeklySessions
+      .filter(
+        (weeklySession) =>
+          !existingSessions.some(
+            (session) =>
+              session.start === weeklySession.start && session.end === weeklySession.end
+          )
+      )
+      .map((session) => ({
+        id: generateId(),
+        start: session.start,
+        end: session.end,
+        doneNotes: "",
+        todoNotes: "",
+      }))
+
+    const mergedSessions = [...existingSessions, ...missingSessions]
+    const totalMinutes = mergedSessions.reduce((sum, session) => {
+      if (!session.start || !session.end) return sum
+      const [startHour, startMinute] = session.start.split(":").map(Number)
+      const [endHour, endMinute] = session.end.split(":").map(Number)
+      return sum + (endHour * 60 + endMinute) - (startHour * 60 + startMinute)
+    }, 0)
+
+    const interneAdminEntry: DayProjectEntry = existingInterneAdmin
+      ? {
+          ...existingInterneAdmin,
+          notes: "30min weekly, 30min Dev Meeting",
+          workSessions: mergedSessions,
+          hoursWorked: Math.max(0, Math.round((totalMinutes / 60) * 100) / 100),
+        }
+      : {
+          id: generateId(),
+          projectId: interneAdminProject.id,
+          notes: "30min weekly, 30min Dev Meeting",
+          hoursWorked: Math.max(0, Math.round((totalMinutes / 60) * 100) / 100),
+          workSessions: mergedSessions,
+        }
+
+    const updatedProjects = existingInterneAdmin
+      ? existingProjects.map((projectEntry) =>
+          projectEntry.id === existingInterneAdmin.id ? interneAdminEntry : projectEntry
+        )
+      : [...existingProjects, interneAdminEntry]
+
+    createOrUpdateEntry(selectedDate, { projects: updatedProjects })
+  }, [projects, currentEntry, snapshot, createOrUpdateEntry, selectedDate])
+
   // Wrapped project actions with snapshots
   const handleAddProject = useCallback(
     (data: Omit<Project, "id" | "color" | "createdAt" | "updatedAt">) => {
@@ -220,6 +291,7 @@ export default function HomePage() {
             todoGroups={todoGroups}
             onUpdateEntry={handleUpdateEntryWithSnapshot}
             onAddProject={handleAddProjectToDay}
+            onAutoWeekly={handleAutoWeekly}
             onUpdateProject={handleUpdateDayProject}
             onRemoveProject={handleRemoveDayProject}
             onReorderProjects={handleReorderProjects}

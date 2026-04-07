@@ -15,6 +15,7 @@ interface DailyViewProps {
   todoGroups: TodoGroup[]
   onUpdateEntry: (data: Partial<DayEntry>) => void
   onAddProject: (projectId: string, taskId?: string) => void
+  onAutoWeekly: () => void
   onUpdateProject: (projectEntryId: string, data: Partial<DayProjectEntry>) => void
   onRemoveProject: (projectEntryId: string) => void
   onReorderProjects: (fromIndex: number, toIndex: number) => void
@@ -30,6 +31,7 @@ export function DailyView({
   todoGroups,
   onUpdateEntry,
   onAddProject,
+  onAutoWeekly,
   onUpdateProject,
   onRemoveProject,
   onReorderProjects,
@@ -61,6 +63,7 @@ export function DailyView({
           todoGroups={todoGroups}
           selectedDate={selectedDate}
           onAddProject={onAddProject}
+          onAutoWeekly={onAutoWeekly}
           onUpdateProject={onUpdateProject}
           onRemoveProject={onRemoveProject}
           onReorderProjects={onReorderProjects}

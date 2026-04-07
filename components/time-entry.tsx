@@ -9,7 +9,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 import type { DayEntry, Break, DayProjectEntry, WorkSession, LocationBlock, LocationType } from "@/lib/types"
-import { timeDiffMinutes } from "@/lib/utils"
+import { finalizeTimeInput, normalizeTimeInput, timeDiffMinutes } from "@/lib/utils"
 import { parseISO, isToday } from "date-fns"
 
 interface TimeEntryProps {
@@ -341,6 +341,20 @@ export function TimeEntry({ entry, selectedDate, onUpdate, dayProjects, onUpdate
     onUpdate({ breaks: updatedBreaks })
   }
 
+  const handleTimeFieldChange = (
+    value: string,
+    update: (next: string) => void
+  ) => {
+    update(normalizeTimeInput(value))
+  }
+
+  const handleTimeFieldBlur = (
+    value: string,
+    update: (next: string) => void
+  ) => {
+    update(finalizeTimeInput(value))
+  }
+
   const setBreakCurrentTime = (id: string, field: 'start' | 'end') => {
     const now = new Date()
     const timeString = now.toTimeString().slice(0, 5)
@@ -591,17 +605,24 @@ export function TimeEntry({ entry, selectedDate, onUpdate, dayProjects, onUpdate
                     </span>
                     <div className="grid flex-1 grid-cols-2 gap-2">
                       <Input
-                        type="time"
+                        type="text"
+                        inputMode="numeric"
                         value={block.start}
-                        onChange={(e) => updateLocationBlock(block.id, 'start', e.target.value)}
+                        onChange={(e) => handleTimeFieldChange(e.target.value, (next) => updateLocationBlock(block.id, 'start', next))}
+                        onBlur={(e) => handleTimeFieldBlur(e.target.value, (next) => updateLocationBlock(block.id, 'start', next))}
                         className="h-8 text-sm"
+                        placeholder="HH:MM"
+                        maxLength={5}
                       />
                       <Input
-                        type="time"
+                        type="text"
+                        inputMode="numeric"
                         value={block.end}
-                        onChange={(e) => updateLocationBlock(block.id, 'end', e.target.value)}
+                        onChange={(e) => handleTimeFieldChange(e.target.value, (next) => updateLocationBlock(block.id, 'end', next))}
+                        onBlur={(e) => handleTimeFieldBlur(e.target.value, (next) => updateLocationBlock(block.id, 'end', next))}
                         className="h-8 text-sm"
-                        placeholder="--:--"
+                        placeholder="HH:MM"
+                        maxLength={5}
                       />
                     </div>
                     {blockDuration > 0 && (
@@ -661,10 +682,14 @@ export function TimeEntry({ entry, selectedDate, onUpdate, dayProjects, onUpdate
               <div className="flex gap-2">
                 <Input
                   id="lunch-start"
-                  type="time"
+                  type="text"
+                  inputMode="numeric"
                   value={lunchStart}
-                  onChange={(e) => onUpdate({ lunchStart: e.target.value })}
+                  onChange={(e) => handleTimeFieldChange(e.target.value, (next) => onUpdate({ lunchStart: next }))}
+                  onBlur={(e) => handleTimeFieldBlur(e.target.value, (next) => onUpdate({ lunchStart: next }))}
                   className="flex-1"
+                  placeholder="HH:MM"
+                  maxLength={5}
                 />
                 <Button
                   variant="outline"
@@ -682,10 +707,14 @@ export function TimeEntry({ entry, selectedDate, onUpdate, dayProjects, onUpdate
               <div className="flex gap-2">
                 <Input
                   id="lunch-end"
-                  type="time"
+                  type="text"
+                  inputMode="numeric"
                   value={lunchEnd}
-                  onChange={(e) => onUpdate({ lunchEnd: e.target.value })}
+                  onChange={(e) => handleTimeFieldChange(e.target.value, (next) => onUpdate({ lunchEnd: next }))}
+                  onBlur={(e) => handleTimeFieldBlur(e.target.value, (next) => onUpdate({ lunchEnd: next }))}
                   className="flex-1"
+                  placeholder="HH:MM"
+                  maxLength={5}
                 />
                 <Button
                   variant="outline"
@@ -733,11 +762,14 @@ export function TimeEntry({ entry, selectedDate, onUpdate, dayProjects, onUpdate
                 <div className="grid flex-1 grid-cols-2 gap-2">
                   <div className="flex gap-1">
                     <Input
-                      type="time"
+                      type="text"
+                      inputMode="numeric"
                       value={brk.start}
-                      onChange={(e) => updateBreak(brk.id, 'start', e.target.value)}
+                      onChange={(e) => handleTimeFieldChange(e.target.value, (next) => updateBreak(brk.id, 'start', next))}
+                      onBlur={(e) => handleTimeFieldBlur(e.target.value, (next) => updateBreak(brk.id, 'start', next))}
                       className="h-8 text-sm"
-                      placeholder="Start"
+                      placeholder="HH:MM"
+                      maxLength={5}
                     />
                     <Button
                       variant="ghost"
@@ -751,11 +783,14 @@ export function TimeEntry({ entry, selectedDate, onUpdate, dayProjects, onUpdate
                   </div>
                   <div className="flex gap-1">
                     <Input
-                      type="time"
+                      type="text"
+                      inputMode="numeric"
                       value={brk.end}
-                      onChange={(e) => updateBreak(brk.id, 'end', e.target.value)}
+                      onChange={(e) => handleTimeFieldChange(e.target.value, (next) => updateBreak(brk.id, 'end', next))}
+                      onBlur={(e) => handleTimeFieldBlur(e.target.value, (next) => updateBreak(brk.id, 'end', next))}
                       className="h-8 text-sm"
-                      placeholder="End"
+                      placeholder="HH:MM"
+                      maxLength={5}
                     />
                     <Button
                       variant="ghost"
