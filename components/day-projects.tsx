@@ -164,6 +164,8 @@ function WorkSessionItem({
   sessions,
   assignedTodos,
   onDropTodo,
+  onUpdateTodo,
+  selectedDate,
   onUpdate,
 }: {
   session: WorkSession
@@ -172,6 +174,8 @@ function WorkSessionItem({
   sessions: WorkSession[]
   assignedTodos: TodoItem[]
   onDropTodo: (sessionId: string, payload: { groupId: string; itemId: string }) => void
+  onUpdateTodo: (itemId: string, data: Partial<TodoItem>) => void
+  selectedDate: string
   onUpdate: (projectEntryId: string, data: Partial<DayProjectEntry>) => void
 }) {
   const [isExpanded, setIsExpanded] = useState(false)
@@ -288,11 +292,11 @@ function WorkSessionItem({
       {isExpanded && (
         <div className="border-t border-border/30 p-3">
           <div className="grid gap-3 md:grid-cols-2">
-            {/* Todos Done Section */}
+            {/* Todos worked on Section */}
             <div className="space-y-1.5">
               <Label className="flex items-center gap-1.5 text-xs font-medium text-emerald-400">
                 <CheckCircle2 className="h-3 w-3" />
-                Todos Done
+                Worked on this session
               </Label>
               <div className="rounded-md border border-emerald-500/30 bg-emerald-500/5 min-h-[80px] px-2.5 py-2">
                 <div
@@ -315,13 +319,32 @@ function WorkSessionItem({
                   }}
                 >
                 {assignedTodos.length === 0 ? (
-                  <p className="text-xs text-muted-foreground/40">No todos assigned to this session.</p>
+                  <p className="text-xs text-muted-foreground/40">No todos linked to this session yet.</p>
                 ) : (
                   <ul className="space-y-1.5">
                     {assignedTodos.map((todo) => (
                       <li key={todo.id} className="flex items-start gap-1.5 text-xs text-foreground">
-                        <CheckCircle2 className="h-3 w-3 text-emerald-400 shrink-0 mt-px" />
-                        <span>{todo.text}</span>
+                        <button
+                          onClick={() =>
+                            onUpdateTodo(todo.id, {
+                              done: !todo.done,
+                              doneAt: !todo.done ? new Date().toISOString() : undefined,
+                              completedSessionId: !todo.done ? session.id : undefined,
+                              completedSessionSnapshot: !todo.done
+                                ? { date: selectedDate, start: session.start, end: session.end }
+                                : undefined,
+                            })
+                          }
+                          title={todo.done ? "Mark as not done" : "Mark as done in this session"}
+                          className={`shrink-0 transition-colors mt-px ${
+                            todo.done
+                              ? "text-emerald-300 hover:text-emerald-200"
+                              : "text-muted-foreground/50 hover:text-emerald-300"
+                          }`}
+                        >
+                          <CheckCircle2 className={`h-3.5 w-3.5 ${todo.done ? "" : "opacity-70"}`} />
+                        </button>
+                        <span className={todo.done ? "line-through text-muted-foreground" : ""}>{todo.text}</span>
                       </li>
                     ))}
                   </ul>
@@ -449,8 +472,7 @@ export function DayProjects({
   const assignTodoToSession = (
     groupId: string,
     item: TodoItem,
-    session: WorkSession,
-    completeInSession: boolean
+    session: WorkSession
   ) => {
     const assignedSessionIds = getAssignedSessionIds(item)
     const nextAssignedSessionIds = assignedSessionIds.includes(session.id)
@@ -459,14 +481,6 @@ export function DayProjects({
 
     onUpdateTodoItem(groupId, item.id, {
       assignedSessionIds: nextAssignedSessionIds,
-      done: completeInSession ? true : item.done,
-      doneAt: completeInSession ? new Date().toISOString() : item.doneAt,
-      completedSessionId: completeInSession
-        ? session.id
-        : (item.completedSessionId ?? item.sessionId),
-      completedSessionSnapshot: completeInSession
-        ? { date: selectedDate, start: session.start, end: session.end }
-        : (item.completedSessionSnapshot ?? item.sessionSnapshot),
     })
   }
 
@@ -649,14 +663,16 @@ export function DayProjects({
                           index={index}
                           projectEntryId={dayProject.id}
                           sessions={sessions}
-                          assignedTodos={linkedTodoGroup ? linkedTodoGroup.items.filter((item) => getCompletedSessionId(item) === session.id) : []}
+                          assignedTodos={linkedTodoGroup ? linkedTodoGroup.items.filter((item) => getAssignedSessionIds(item).includes(session.id)) : []}
                           onDropTodo={(sessionId, payload) => {
                             if (!linkedTodoGroup || payload.groupId !== linkedTodoGroup.id) return
                             const targetSession = sessions.find((s) => s.id === sessionId)
                             const todo = linkedTodoGroup.items.find((i) => i.id === payload.itemId)
                             if (!targetSession || !todo) return
-                            assignTodoToSession(linkedTodoGroup.id, todo, targetSession, true)
+                            assignTodoToSession(linkedTodoGroup.id, todo, targetSession)
                           }}
+                          onUpdateTodo={(itemId, data) => onUpdateTodoItem(linkedTodoGroup.id, itemId, data)}
+                          selectedDate={selectedDate}
                           onUpdate={onUpdateProject}
                         />
                       ))}
